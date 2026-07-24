@@ -6,6 +6,7 @@
   const cmdKey = cue.platform === 'darwin' ? '⌘' : 'Ctrl';
   const isCmdOrCtrl = (e) => cue.platform === 'darwin' ? e.metaKey : e.ctrlKey;
   const DEFAULT_ASSIST_SHORTCUT = 'CommandOrControl+Return';
+  const DEFAULT_LEETCODE_SHORTCUT = 'CommandOrControl+H';
 
   // ---- paint icons -------------------------------------------------------
   $('#logo-btn').innerHTML = icon('logo', { size: 18 });
@@ -24,8 +25,21 @@
   let busy = false;
   let aiEl = null;       // current streaming <div class="ai-text">
   let caretEl = null;
-  let assistShortcut = DEFAULT_ASSIST_SHORTCUT;
-  let recordingShortcut = false;
+
+  // Configurable global shortcuts. Each entry's DOM elements live in the
+  // settings panel; `recording` holds the name of the target currently
+  // capturing a new key combination, or null.
+  const SHORTCUT_TARGETS = {
+    assist: {
+      value: DEFAULT_ASSIST_SHORTCUT, default: DEFAULT_ASSIST_SHORTCUT, label: 'Assist',
+      btn: $('#shortcut-assist'), resetBtn: $('#shortcut-assist-reset')
+    },
+    leetcode: {
+      value: DEFAULT_LEETCODE_SHORTCUT, default: DEFAULT_LEETCODE_SHORTCUT, label: 'Solve-on-screen',
+      btn: $('#shortcut-leetcode'), resetBtn: $('#shortcut-leetcode-reset')
+    }
+  };
+  let recording = null;
 
   const messages = $('#messages');
 
@@ -48,11 +62,13 @@
     return shortcutParts(accelerator).map((part) => '<span class="' + cls + '">' + esc(part) + '</span>').join(' ');
   }
 
-  function syncAssistShortcutLabels() {
-    const shortcutBtn = $('#shortcut-assist');
-    if (shortcutBtn && !recordingShortcut) shortcutBtn.textContent = shortcutParts(assistShortcut).join(' + ');
+  function syncShortcutLabels() {
+    for (const name of Object.keys(SHORTCUT_TARGETS)) {
+      const t = SHORTCUT_TARGETS[name];
+      if (t.btn && recording !== name) t.btn.textContent = shortcutParts(t.value).join(' + ');
+    }
     const placeholder = $('#placeholder');
-    if (placeholder) placeholder.innerHTML = 'Ask about your screen or conversation, or ' + shortcutKeycapsHtml(assistShortcut) + ' for Assist';
+    if (placeholder) placeholder.innerHTML = 'Ask about your screen or conversation, or ' + shortcutKeycapsHtml(SHORTCUT_TARGETS.assist.value) + ' for Assist';
   }
 
   // minimal, safe markdown: fenced code, bullets, inline code, bold, paragraphs
@@ -148,11 +164,10 @@
     runMode('ask', text);
   }
   $('#send-btn').addEventListener('click', send);
+  // Assist itself is triggered solely by the global shortcut registered in the
+  // main process (it works regardless of focus) — no local duplicate here, so
+  // there's no risk of a single keypress firing the action twice.
   input.addEventListener('keydown', (e) => {
-    const captured = keyEventToAccelerator(e);
-    if (captured.accelerator && captured.accelerator.toLowerCase() === assistShortcut.toLowerCase()) {
-      e.preventDefault(); runMode('assist', ''); return;
-    }
     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); send(); }
   });
 
@@ -283,7 +298,7 @@
     $('#resume-context').value = settings.resumeContext || '';
     const m = settings.models[settings.provider] || { fast: '', smart: '' };
     $('#model-fast').value = m.fast; $('#model-smart').value = m.smart;
-    syncAssistShortcutLabels();
+    syncShortcutLabels();
     $('#s-status').textContent = statusText();
   }
   $('#clear-resume').addEventListener('click', async () => {
@@ -316,9 +331,9 @@
     await cue.settingsSet(settings);
   }
 
-  // Assist shortcut recorder. The renderer captures a key combination and the
-  // main process only saves it after Electron confirms the global registration.
-  const shortcutBtn = $('#shortcut-assist');
+  // Shortcut recorders (Assist + Solve-on-screen). The renderer captures a key
+  // combination and the main process only saves it after Electron confirms the
+  // global registration.
   const shortcutHint = $('#shortcut-hint');
 
   function setShortcutHint(message, kind) {
@@ -328,9 +343,11 @@
   }
 
   function cancelShortcutRecording() {
-    recordingShortcut = false;
-    shortcutBtn.classList.remove('recording');
-    syncAssistShortcutLabels();
+    if (!recording) return;
+    const t = SHORTCUT_TARGETS[recording];
+    if (t.btn) t.btn.classList.remove('recording');
+    recording = null;
+    syncShortcutLabels();
   }
 
   function keyEventToAccelerator(e) {
@@ -362,43 +379,49 @@
     return { accelerator: parts.join('+') };
   }
 
-  async function applyAssistShortcut(accelerator) {
-    const wasRecording = recordingShortcut;
-    recordingShortcut = false;
-    shortcutBtn.classList.remove('recording');
-    shortcutBtn.textContent = 'Saving…';
+  async function applyShortcut(name, accelerator) {
+    const t = SHORTCUT_TARGETS[name];
+    const wasRecording = recording === name;
+    recording = null;
+    if (t.btn) { t.btn.classList.remove('recording'); t.btn.textContent = 'Saving…'; }
     let result;
     try {
-      result = await cue.shortcutAssistSet(accelerator);
+      result = await cue.shortcutSet(name, accelerator);
     } catch (_) {
       result = { ok: false, error: 'cue could not update the shortcut. Please try again.' };
     }
     if (!result.ok) {
       setShortcutHint(result.error, 'error');
-      recordingShortcut = wasRecording;
-      shortcutBtn.classList.toggle('recording', recordingShortcut);
-      if (recordingShortcut) shortcutBtn.textContent = 'Press keys…';
-      else syncAssistShortcutLabels();
+      recording = wasRecording ? name : null;
+      if (t.btn) {
+        t.btn.classList.toggle('recording', recording === name);
+        if (recording === name) t.btn.textContent = 'Press keys…';
+      }
+      if (recording !== name) syncShortcutLabels();
       return;
     }
-    assistShortcut = result.accelerator;
+    t.value = result.accelerator;
     if (!settings.shortcuts) settings.shortcuts = {};
-    settings.shortcuts.assist = assistShortcut;
+    settings.shortcuts[name] = t.value;
     cancelShortcutRecording();
-    setShortcutHint('Assist shortcut updated.', 'success');
+    setShortcutHint(t.label + ' shortcut updated.', 'success');
   }
 
-  shortcutBtn.addEventListener('click', () => {
-    recordingShortcut = true;
-    shortcutBtn.classList.add('recording');
-    shortcutBtn.textContent = 'Press keys…';
-    setShortcutHint('Press Escape to cancel.', '');
+  Object.keys(SHORTCUT_TARGETS).forEach((name) => {
+    const t = SHORTCUT_TARGETS[name];
+    if (t.btn) {
+      t.btn.addEventListener('click', () => {
+        recording = name;
+        t.btn.classList.add('recording');
+        t.btn.textContent = 'Press keys…';
+        setShortcutHint('Press Escape to cancel.', '');
+      });
+    }
+    if (t.resetBtn) t.resetBtn.addEventListener('click', () => applyShortcut(name, t.default));
   });
 
-  $('#shortcut-reset').addEventListener('click', () => applyAssistShortcut(DEFAULT_ASSIST_SHORTCUT));
-
   document.addEventListener('keydown', (e) => {
-    if (!recordingShortcut) return;
+    if (!recording) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (e.key === 'Escape') {
@@ -411,7 +434,7 @@
       setShortcutHint(captured.error, 'error');
       return;
     }
-    applyAssistShortcut(captured.accelerator);
+    applyShortcut(recording, captured.accelerator);
   }, true);
 
   // ---- example conversation (matches the reference screenshot) ------------
@@ -484,7 +507,7 @@
     {
       icon: '✨',
       title: 'You’re all set',
-      body: () => `How to use cue:<ul><li>${shortcutKeycapsHtml(assistShortcut, 'kbd')} — <strong>Assist</strong> with whatever's on screen or being said</li><li><span class="kbd">${cmdKey}</span> <span class="kbd">H</span> — solve a coding problem on screen</li><li>Click <strong>▢</strong> in the top bar to start listening to a meeting</li><li>Type a question and press <span class="kbd">↵</span></li></ul>Reopen this guide anytime by clicking the <strong>cue logo</strong>. Change Assist's shortcut in <strong>Settings</strong>. Quit with <span class="kbd">${cmdKey}</span><span class="kbd">⇧</span><span class="kbd">X</span>.`
+      body: () => `How to use cue:<ul><li>${shortcutKeycapsHtml(SHORTCUT_TARGETS.assist.value, 'kbd')} — <strong>Assist</strong> with whatever's on screen or being said</li><li>${shortcutKeycapsHtml(SHORTCUT_TARGETS.leetcode.value, 'kbd')} — solve a coding problem on screen</li><li>Click <strong>▢</strong> in the top bar to start listening to a meeting</li><li>Type a question and press <span class="kbd">↵</span></li></ul>Reopen this guide anytime by clicking the <strong>cue logo</strong>. Change shortcuts in <strong>Settings</strong>. Quit with <span class="kbd">${cmdKey}</span><span class="kbd">⇧</span><span class="kbd">X</span>.`
     }
   ];
   let obIndex = 0;
@@ -514,8 +537,15 @@
   // ---- boot --------------------------------------------------------------
   (async function boot() {
     settings = await cue.settingsGet();
-    assistShortcut = (settings.shortcuts && settings.shortcuts.assist) || DEFAULT_ASSIST_SHORTCUT;
-    syncAssistShortcutLabels();
+    SHORTCUT_TARGETS.assist.value = (settings.shortcuts && settings.shortcuts.assist) || DEFAULT_ASSIST_SHORTCUT;
+    SHORTCUT_TARGETS.leetcode.value = (settings.shortcuts && settings.shortcuts.leetcode) || DEFAULT_LEETCODE_SHORTCUT;
+    syncShortcutLabels();
+    if (cue.resumeContextLimit) {
+      const resumeEl = $('#resume-context');
+      const resumeHint = $('#resume-hint');
+      if (resumeEl) resumeEl.maxLength = cue.resumeContextLimit;
+      if (resumeHint) resumeHint.textContent = 'Maximum ' + cue.resumeContextLimit.toLocaleString() + ' characters';
+    }
     smartBtn.classList.toggle('on', !!settings.smart);
     showExample();
     syncPlaceholder();

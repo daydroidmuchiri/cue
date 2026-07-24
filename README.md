@@ -98,7 +98,7 @@ cue uses **your own** API key, so it's free to run (you only pay your AI provide
 | **Anthropic (Claude)** | [console.anthropic.com](https://console.anthropic.com) | Great for screen & coding help. Claude has no speech-to-text, so add an OpenAI or Gemini key too if you want the listening features. |
 | **Google Gemini** | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | One key does chat + transcription. |
 
-Your key is stored **only on your computer** (in `cue-data.json`) and is sent **only** to that provider. cue has no server and collects nothing.
+Your key is stored **only on your computer** (encrypted at rest, in `cue-data.json`) and is sent **only** to that provider. cue has no server and collects nothing.
 
 ### Step 3 — The Zoom setting (only needed for Zoom)
 
@@ -115,7 +115,7 @@ cue is hidden from most screen-share tools automatically — **Google Meet, Micr
 ## How to use it
 
 - **`⌘` `↵` — Assist.** The do-the-smart-thing key. On a coding problem it solves it; in a conversation it tells you what to say. Works from anywhere. Change this shortcut under **Settings → Keyboard shortcuts**.
-- **`⌘` `H` — Solve what's on screen.** Screenshots a coding problem and returns the approach, code, and time/space complexity.
+- **`⌘` `H` — Solve what's on screen.** Screenshots a coding problem and returns the approach, code, and time/space complexity. Also configurable under **Settings → Keyboard shortcuts** if it collides with another app on your machine.
 - **The `▢` button** (top bar) — start/stop **listening** to a meeting. The green dot means it's live.
 - **Type a question** in the box and press `↵` to ask about your screen or conversation.
 - **Smart** — flip it on for a smarter, more thorough model; off for fast and cheap.
@@ -170,8 +170,8 @@ Run `xattr -cr /Applications/cue.app` in Terminal once (see Install → Option A
 ## Privacy
 
 - No accounts, no servers, no telemetry. cue collects nothing.
-- Your API keys live in a local file (`cue-data.json`) and are sent only to the provider you chose.
-- Screenshots and audio are sent to your AI provider only when a feature runs, and are not stored by cue beyond the current session's transcript (kept in memory).
+- Your API keys live in a local file (`cue-data.json`), encrypted at rest via your OS's keychain/credential store (Electron `safeStorage`), and are sent only to the provider you chose.
+- Screenshots and audio are sent to your AI provider only when a feature runs, and are not stored by cue beyond the current session's transcript (kept in memory, capped to the most recent turns for long sessions).
 
 ## Contributing
 

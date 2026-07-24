@@ -75,7 +75,7 @@
 
         <label class="s-label" for="resume-context">Résumé / professional background <span class="s-hint">stored locally; sent to your selected provider with each request</span></label>
         <textarea id="resume-context" class="s-textarea" maxlength="12000" placeholder="Paste your résumé or professional background here. cue will use it as the factual source for career-related answers."></textarea>
-        <div class="s-resume-actions"><span class="s-hint">Maximum 12,000 characters</span><button id="clear-resume" type="button">Clear résumé</button></div>
+        <div class="s-resume-actions"><span class="s-hint" id="resume-hint">Maximum 12,000 characters</span><button id="clear-resume" type="button">Clear résumé</button></div>
 
         <label class="s-label">Models <span class="s-hint">fast = Smart off · smart = Smart on</span></label>
         <div class="s-field"><span>Fast</span><input id="model-fast" type="text" autocomplete="off" /></div>
@@ -85,9 +85,14 @@
         <div class="s-shortcut">
           <span>Assist</span>
           <button id="shortcut-assist" class="shortcut-record" type="button" aria-label="Change Assist shortcut"></button>
-          <button id="shortcut-reset" class="shortcut-reset" type="button">Reset</button>
+          <button id="shortcut-assist-reset" class="shortcut-reset" type="button">Reset</button>
         </div>
-        <div class="shortcut-hint" id="shortcut-hint">Click the shortcut, then press a new key combination.</div>
+        <div class="s-shortcut">
+          <span>Solve on screen</span>
+          <button id="shortcut-leetcode" class="shortcut-record" type="button" aria-label="Change Solve-on-screen shortcut"></button>
+          <button id="shortcut-leetcode-reset" class="shortcut-reset" type="button">Reset</button>
+        </div>
+        <div class="shortcut-hint" id="shortcut-hint">Click a shortcut, then press a new key combination.</div>
 
         <div class="s-status" id="s-status"></div>
       </div>

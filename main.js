@@ -8,21 +8,30 @@ const { createLLM } = require('./src/llm');
 const { MODES } = require('./src/prompts');
 const { appendResumeContext } = require('./src/profile-context');
 const { rms16 } = require('./src/wav');
+const { appendTurn } = require('./src/transcript');
+const { pushCapped } = require('./src/audio-buffer');
+const { normalizeShortcut, findCollision, createTriggerGuard } = require('./src/shortcuts');
 
 let win = null;
-let registeredAssistShortcut = null;
+let registeredShortcuts = {}; // action name -> accelerator currently registered
 
-const DEFAULT_ASSIST_SHORTCUT = 'CommandOrControl+Return';
-const RESERVED_SHORTCUTS = new Set([
-  'commandorcontrol+h',
-  'commandorcontrol+shift+x'
-]);
+// Both are user-configurable (Settings); defaults preserve existing behavior/docs.
+const SHORTCUT_ACTIONS = {
+  assist: { default: 'CommandOrControl+Return', run: () => runFeature('assist', '') },
+  leetcode: { default: 'CommandOrControl+H', run: () => runFeature('leetcode', '') }
+};
+const QUIT_SHORTCUT = 'CommandOrControl+Shift+X';
+
+// Ignores a second trigger for the same shortcut arriving within this window —
+// e.g. OS key-repeat, or a global shortcut and an in-app handler both firing
+// for the same physical keypress.
+const shouldFireShortcut = createTriggerGuard(400);
 
 // -------- capture / transcript state --------
 const state = { capturing: false, busy: false, transcribing: { you: false, them: false } };
 let sttDisabled = false; // set when the key can't reach any speech model (stops retry spam)
 const buffers = { you: [], them: [] };
-const transcript = []; // { channel, text, ts }
+const transcript = []; // { channel, text, ts } — capped by appendTurn to bound memory/token growth
 const FLUSH_MS = 3500;
 const MIN_BYTES = Math.floor(16000 * 2 * 0.6); // ~0.6s
 const RMS_GATE = 240;
@@ -66,6 +75,11 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  // Defense-in-depth: this window only ever shows its own local index.html.
+  // Block any attempt to navigate it elsewhere or spawn child windows/popups.
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   win.webContents.on('did-finish-load', () => win.showInactive());
   win.webContents.on('render-process-gone', (_e, d) => console.log('[cue] renderer gone', JSON.stringify(d)));
 }
@@ -95,7 +109,7 @@ async function flushChannel(channel) {
     }
     if (res.text && res.text.trim()) {
       const turn = { channel, text: res.text.trim(), ts: Date.now() };
-      transcript.push(turn);
+      appendTurn(transcript, turn);
       if (DEBUG) console.log(`[TRANSCRIPT] ${channel === 'you' ? 'You' : 'Them'}:`, turn.text);
       send('transcript', turn);
     }
@@ -196,62 +210,77 @@ async function runFeature(mode, userText) {
 // -------- IPC --------
 ipcMain.handle('settings:get', () => store.getSettings());
 ipcMain.handle('settings:set', (_e, patch) => { sttDisabled = false; return store.setSettings(patch); });
-ipcMain.handle('shortcut:assist:set', (_e, accelerator) => setAssistShortcut(accelerator));
+ipcMain.handle('shortcut:set', (_e, payload) => setShortcut(payload && payload.name, payload && payload.accelerator));
 ipcMain.handle('capture:toggle', () => setCapturing(!state.capturing));
 ipcMain.handle('capture:state', () => ({ active: state.capturing }));
 ipcMain.on('ask', (_e, payload) => runFeature(payload.mode, payload.text));
-ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) buffers.you.push(Buffer.from(arrayBuffer)); });
-ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) buffers.them.push(Buffer.from(arrayBuffer)); });
+ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) pushCapped(buffers.you, Buffer.from(arrayBuffer)); });
+ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) pushCapped(buffers.them, Buffer.from(arrayBuffer)); });
 ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
 ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
 ipcMain.on('log', (_e, msg) => console.log('[renderer]', msg));
 
 // -------- shortcuts --------
-function normalizeShortcut(accelerator) {
-  return typeof accelerator === 'string' ? accelerator.trim().replace(/\s+/g, '') : '';
+// Bindings currently in effect, keyed the same way findCollision expects
+// (action name -> accelerator), plus the fixed Quit binding.
+function currentBindings() {
+  const bindings = { quit: QUIT_SHORTCUT };
+  for (const name of Object.keys(SHORTCUT_ACTIONS)) {
+    bindings[name] = registeredShortcuts[name] || SHORTCUT_ACTIONS[name].default;
+  }
+  return bindings;
 }
 
-function registerAssistShortcut(accelerator) {
-  const next = normalizeShortcut(accelerator) || DEFAULT_ASSIST_SHORTCUT;
+function registerShortcut(name, accelerator) {
+  const def = SHORTCUT_ACTIONS[name];
+  if (!def) return { ok: false, error: 'Unknown shortcut.' };
+
+  const next = normalizeShortcut(accelerator) || def.default;
   if (next.length > 80) return { ok: false, error: 'That shortcut is too long.' };
-  if (RESERVED_SHORTCUTS.has(next.toLowerCase())) {
-    return { ok: false, error: 'That shortcut is reserved by another cue action.' };
+
+  const collision = findCollision(next, name, currentBindings());
+  if (collision) {
+    const label = collision === 'quit' ? 'Quit' : collision === 'assist' ? 'Assist' : 'Solve on screen';
+    return { ok: false, error: 'That shortcut is already used by ' + label + '.' };
   }
 
-  const previous = registeredAssistShortcut;
+  const previous = registeredShortcuts[name];
+  const handler = () => { if (shouldFireShortcut(name)) def.run(); };
   if (previous) globalShortcut.unregister(previous);
 
   try {
-    if (!globalShortcut.register(next, () => runFeature('assist', ''))) {
-      if (previous) globalShortcut.register(previous, () => runFeature('assist', ''));
+    if (!globalShortcut.register(next, handler)) {
+      if (previous) globalShortcut.register(previous, handler);
       return { ok: false, error: 'That shortcut is already in use by another application.' };
     }
   } catch (_) {
-    if (previous) globalShortcut.register(previous, () => runFeature('assist', ''));
+    if (previous) globalShortcut.register(previous, handler);
     return { ok: false, error: 'That key combination is not a valid global shortcut.' };
   }
 
-  registeredAssistShortcut = next;
+  registeredShortcuts[name] = next;
   return { ok: true, accelerator: next };
 }
 
-function setAssistShortcut(accelerator) {
-  const result = registerAssistShortcut(accelerator);
-  if (result.ok) store.setSettings({ shortcuts: { assist: result.accelerator } });
+function setShortcut(name, accelerator) {
+  const result = registerShortcut(name, accelerator);
+  if (result.ok) store.setSettings({ shortcuts: { [name]: result.accelerator } });
   return result;
 }
 
 function registerShortcuts() {
-  globalShortcut.register('CommandOrControl+H', () => runFeature('leetcode', ''));
-  globalShortcut.register('CommandOrControl+Shift+X', () => app.quit());
+  globalShortcut.register(QUIT_SHORTCUT, () => app.quit());
 
   const settings = store.getSettings();
-  const configured = settings.shortcuts && settings.shortcuts.assist;
-  const result = registerAssistShortcut(configured || DEFAULT_ASSIST_SHORTCUT);
-  if (!result.ok && configured && configured !== DEFAULT_ASSIST_SHORTCUT) {
-    console.log('[cue] unable to register Assist shortcut:', result.error, 'Falling back to default.');
-    const fallback = registerAssistShortcut(DEFAULT_ASSIST_SHORTCUT);
-    if (fallback.ok) store.setSettings({ shortcuts: { assist: DEFAULT_ASSIST_SHORTCUT } });
+  for (const name of Object.keys(SHORTCUT_ACTIONS)) {
+    const def = SHORTCUT_ACTIONS[name];
+    const configured = settings.shortcuts && settings.shortcuts[name];
+    const result = registerShortcut(name, configured || def.default);
+    if (!result.ok && configured && configured !== def.default) {
+      console.log('[cue] unable to register', name, 'shortcut:', result.error, 'Falling back to default.');
+      const fallback = registerShortcut(name, def.default);
+      if (fallback.ok) store.setSettings({ shortcuts: { [name]: def.default } });
+    }
   }
 }
 
@@ -271,6 +300,11 @@ app.whenReady().then(() => {
       else callback();
     }).catch(() => callback());
   }, { useSystemPicker: false });
+
+  // Force a resave through store.setSettings so any API keys still sitting in
+  // plaintext from before at-rest encryption existed get migrated immediately,
+  // rather than staying plaintext until the user happens to change a setting.
+  store.setSettings({});
 
   createWindow();
   registerShortcuts();
