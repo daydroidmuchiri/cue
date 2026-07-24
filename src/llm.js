@@ -9,6 +9,38 @@ const DEFAULT_MAX_TOKENS = 8192;
 // Safety net so a stalled/hung provider request can't wedge state.busy forever.
 const REQUEST_TIMEOUT_MS = 90000;
 
+// Providers that speak the OpenAI chat-completions API but aren't OpenAI itself —
+// just a different base URL. NVIDIA NIM and OpenRouter both fall into this bucket.
+const PROVIDER_BASE_URLS = {
+  nvidia: 'https://integrate.api.nvidia.com/v1',
+  openrouter: 'https://openrouter.ai/api/v1'
+};
+
+// OpenRouter asks OpenAI-compatible clients to identify the calling app via these
+// headers (used for their public leaderboards, not required for the API to work).
+const OPENROUTER_HEADERS = { 'HTTP-Referer': 'https://github.com/daydroidmuchiri/cue', 'X-Title': 'cue' };
+
+// OpenRouter's own router: auto-picks among whatever free models are actually
+// live right now. Used as a client-side retry target below — NOT sent as part
+// of a multi-model `models` request field, because OpenRouter validates every
+// ID in that array up front and 400s the *entire* request if even one entry
+// has rotated out of the catalog, which defeats the purpose of a fallback.
+const OPENROUTER_FREE_MODEL = 'openrouter/free';
+
+function resolveBaseURL(provider) {
+  return PROVIDER_BASE_URLS[provider];
+}
+
+// True when the chosen model itself is the problem — removed from the catalog
+// (400/404) or its upstream provider is rate-limited/down (429), which is
+// common on OpenRouter's free tier since individual free models share tight
+// per-minute limits across all users. Worth a one-time retry against the free
+// router, which picks a different model. Not true for timeouts/aborts (no HTTP
+// status) or auth errors (401/403), which should surface as-is.
+function isRetriableOpenRouterError(err) {
+  return !!err && (err.status === 400 || err.status === 404 || err.status === 429);
+}
+
 function stripDataUrl(dataUrl) {
   const m = /^data:(.+?);base64,(.*)$/s.exec(dataUrl || '');
   return m ? { mime: m[1], b64: m[2] } : null;
@@ -27,10 +59,10 @@ function withTimeout(promise, ms, controller) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function streamOpenAI({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, baseURL, signal }) {
+async function streamOpenAI({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, baseURL, extraHeaders, signal }) {
   if (DEBUG) console.log('[DEBUG LLM] streamOpenAI called', { model, baseURL, hasImage: !!imageDataUrl, maxTokens });
   const OpenAI = require('openai');
-  const client = new OpenAI({ apiKey, baseURL });
+  const client = new OpenAI({ apiKey, baseURL, defaultHeaders: extraHeaders });
   const messages = [{ role: 'system', content: system }];
   turns.forEach((t, i) => {
     const last = i === turns.length - 1;
@@ -144,9 +176,25 @@ function createLLM(settings) {
       if (DEBUG) console.log('[DEBUG LLM] stream() invoked for provider:', provider);
       const controller = new AbortController();
       const args = { apiKey, model, maxTokens, signal: controller.signal, ...params };
-      const run = () => {
-        if (provider === 'openai') return streamOpenAI(args);
-        if (provider === 'nvidia') return streamOpenAI({ ...args, baseURL: 'https://integrate.api.nvidia.com/v1' });
+      const run = async () => {
+        if (provider === 'openai' || provider === 'nvidia' || provider === 'openrouter') {
+          const openAIArgs = {
+            ...args,
+            baseURL: resolveBaseURL(provider),
+            extraHeaders: provider === 'openrouter' ? OPENROUTER_HEADERS : undefined
+          };
+          try {
+            return await streamOpenAI(openAIArgs);
+          } catch (err) {
+            // The chosen model is unusable right now (rotated out of the catalog,
+            // or its free-tier provider is rate-limited) — retry once against
+            // OpenRouter's own free-model router instead of failing outright.
+            if (provider === 'openrouter' && model !== OPENROUTER_FREE_MODEL && isRetriableOpenRouterError(err)) {
+              return await streamOpenAI({ ...openAIArgs, model: OPENROUTER_FREE_MODEL });
+            }
+            throw err;
+          }
+        }
         if (provider === 'anthropic') return streamAnthropic(args);
         if (provider === 'gemini') return streamGemini(args);
         return Promise.reject(new Error('unknown provider: ' + provider));
@@ -156,4 +204,4 @@ function createLLM(settings) {
   };
 }
 
-module.exports = { createLLM, withTimeout, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS };
+module.exports = { createLLM, withTimeout, resolveBaseURL, isRetriableOpenRouterError, OPENROUTER_FREE_MODEL, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS };

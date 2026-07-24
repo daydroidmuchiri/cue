@@ -97,6 +97,7 @@ cue uses **your own** API key, so it's free to run (you only pay your AI provide
 | **OpenAI** | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | One key does everything — **but** for the *listening* features the key must have **Whisper / audio** access (a "restricted" project key that only allows chat will give a 403 on transcription). |
 | **Anthropic (Claude)** | [console.anthropic.com](https://console.anthropic.com) | Great for screen & coding help. Claude has no speech-to-text, so add an OpenAI or Gemini key too if you want the listening features. |
 | **Google Gemini** | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | One key does chat + transcription. |
+| **OpenRouter** | [openrouter.ai/keys](https://openrouter.ai/keys) | Free tier, defaults to `openrouter/free` — OpenRouter's own router, which auto-picks among whatever free models are live so it doesn't 404 as their catalog rotates. No speech-to-text, so add an OpenAI or Gemini key too if you want the listening features. For more consistent quality (at the cost of occasionally 404ing when that specific model rotates out), pin a specific `:free` model in Settings from [openrouter.ai/models?max_price=0](https://openrouter.ai/models?max_price=0). |
 
 Your key is stored **only on your computer** (encrypted at rest, in `cue-data.json`) and is sent **only** to that provider. cue has no server and collects nothing.
 

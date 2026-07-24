@@ -5,7 +5,7 @@ const { app, safeStorage } = require('electron');
 const { encryptFields, decryptFields } = require('./secure-fields');
 
 const FILE = path.join(app.getPath('userData'), 'cue-data.json');
-const SECRET_FIELDS = ['openai', 'anthropic', 'gemini', 'nvidia'];
+const SECRET_FIELDS = ['openai', 'anthropic', 'gemini', 'nvidia', 'openrouter'];
 
 // API keys are encrypted at rest (OS keychain-backed via Electron's safeStorage)
 // so cue-data.json doesn't hold them in plaintext. Falls back to plaintext,
@@ -21,12 +21,17 @@ const DEFAULTS = {
   smart: false,
   resumeContext: '',
   shortcuts: { assist: 'CommandOrControl+Return', leetcode: 'CommandOrControl+H' },
-  apiKeys: { openai: '', anthropic: '', gemini: '', nvidia: '' },
+  apiKeys: { openai: '', anthropic: '', gemini: '', nvidia: '', openrouter: '' },
   models: {
     openai: { fast: 'gpt-4o-mini', smart: 'gpt-4o' },
     anthropic: { fast: 'claude-3-5-haiku-latest', smart: 'claude-3-5-sonnet-latest' },
     gemini: { fast: 'gemini-2.5-flash', smart: 'gemini-2.5-pro' },
-    nvidia: { fast: 'meta/llama-3.2-11b-vision-instruct', smart: 'meta/llama-3.2-90b-vision-instruct' }
+    nvidia: { fast: 'meta/llama-3.2-11b-vision-instruct', smart: 'meta/llama-3.2-90b-vision-instruct' },
+    // Named models for better quality than the random `openrouter/free` router.
+    // If either rotates out of the catalog, src/llm.js automatically retries
+    // once against `openrouter/free` (see isUnservableModelError) rather than
+    // erroring outright.
+    openrouter: { fast: 'google/gemma-4-26b-a4b-it:free', smart: 'google/gemma-4-31b-it:free' }
   }
 };
 

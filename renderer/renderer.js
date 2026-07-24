@@ -295,6 +295,7 @@
     $('#key-anthropic').value = settings.apiKeys.anthropic || '';
     $('#key-gemini').value = settings.apiKeys.gemini || '';
     $('#key-nvidia').value = settings.apiKeys.nvidia || '';
+    $('#key-openrouter').value = settings.apiKeys.openrouter || '';
     $('#resume-context').value = settings.resumeContext || '';
     const m = settings.models[settings.provider] || { fast: '', smart: '' };
     $('#model-fast').value = m.fast; $('#model-smart').value = m.smart;
@@ -308,7 +309,7 @@
   });
   function statusText() {
     const k = settings.apiKeys;
-    const has = [k.openai && 'OpenAI', k.anthropic && 'Anthropic', k.gemini && 'Gemini', k.nvidia && 'Nvidia'].filter(Boolean);
+    const has = [k.openai && 'OpenAI', k.anthropic && 'Anthropic', k.gemini && 'Gemini', k.nvidia && 'Nvidia', k.openrouter && 'OpenRouter'].filter(Boolean);
     const stt = k.openai ? 'Whisper' : (k.gemini ? 'Gemini' : 'none');
     return 'Active: ' + settings.provider + ' · keys: ' + (has.join(', ') || 'none set') + ' · transcription: ' + stt;
   }
@@ -324,6 +325,7 @@
     settings.apiKeys.anthropic = $('#key-anthropic').value.trim();
     settings.apiKeys.gemini = $('#key-gemini').value.trim();
     settings.apiKeys.nvidia = $('#key-nvidia').value.trim();
+    settings.apiKeys.openrouter = $('#key-openrouter').value.trim();
     settings.resumeContext = $('#resume-context').value.trim();
     if (!settings.models[settings.provider]) settings.models[settings.provider] = {};
     settings.models[settings.provider].fast = $('#model-fast').value.trim();
