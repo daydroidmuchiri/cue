@@ -12,6 +12,14 @@ const { appendTurn } = require('./src/transcript');
 const { pushCapped } = require('./src/audio-buffer');
 const { normalizeShortcut, findCollision, createTriggerGuard } = require('./src/shortcuts');
 
+// Two cue processes would otherwise both register the same global shortcuts
+// (only one wins, silently) and both read/write cue-data.json with no
+// cross-process locking, so a losing writer's settings save can be dropped.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  return;
+}
+
 let win = null;
 let registeredShortcuts = {}; // action name -> accelerator currently registered
 
@@ -301,6 +309,17 @@ function registerShortcuts() {
 }
 
 // -------- lifecycle --------
+// A second launch attempt (double-click, launch-at-login race, a relaunch
+// script) fires this in the original process instead of creating a second
+// one -- bring the existing overlay to the front rather than leaving a
+// duplicate process silently unable to register its shortcuts.
+app.on('second-instance', () => {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
 
