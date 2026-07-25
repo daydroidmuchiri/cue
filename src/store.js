@@ -50,6 +50,7 @@ const settingsStore = createSettingsStore({
 module.exports = {
   getSettings: settingsStore.getSettings,
   setSettings: settingsStore.setSettings,
+  isEncryptionAvailable: cipher.isAvailable,
   DEFAULTS,
   SECRET_FIELDS
 };

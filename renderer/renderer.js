@@ -325,6 +325,19 @@
 
   // ---- settings ----------------------------------------------------------
   const scrim = $('#settings-scrim');
+  // Set once at boot (src/store.js's cipher.isAvailable() doesn't change mid-session).
+  // Settings must never claim "encrypted at rest" when the OS-level cipher isn't
+  // actually available -- keys would otherwise be written to cue-data.json in
+  // plaintext with no indication to the user.
+  let encryptionAvailable = true;
+  function syncEncryptionHint() {
+    const hint = $('#key-encryption-hint');
+    if (!hint) return;
+    hint.textContent = encryptionAvailable
+      ? 'stored locally, encrypted at rest'
+      : 'stored locally — NOT encrypted on this system (OS keychain unavailable)';
+    hint.classList.toggle('warn', !encryptionAvailable);
+  }
   function openSettings() { fillSettings(); scrim.classList.remove('hidden'); }
   function closeSettings() { cancelShortcutRecording(); saveSettings(); scrim.classList.add('hidden'); }
   $('#more-btn').addEventListener('click', openSettings);
@@ -342,6 +355,7 @@
     const m = settings.models[settings.provider] || { fast: '', smart: '' };
     $('#model-fast').value = m.fast; $('#model-smart').value = m.smart;
     syncShortcutLabels();
+    syncEncryptionHint();
     $('#s-status').textContent = statusText();
   }
   $('#clear-resume').addEventListener('click', async () => {
@@ -584,6 +598,7 @@
     SHORTCUT_TARGETS.assist.value = (settings.shortcuts && settings.shortcuts.assist) || DEFAULT_ASSIST_SHORTCUT;
     SHORTCUT_TARGETS.leetcode.value = (settings.shortcuts && settings.shortcuts.leetcode) || DEFAULT_LEETCODE_SHORTCUT;
     syncShortcutLabels();
+    encryptionAvailable = await cue.encryptionAvailableGet();
     const resumeContextLimit = await cue.resumeContextLimitGet();
     if (resumeContextLimit) {
       const resumeEl = $('#resume-context');

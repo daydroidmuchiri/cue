@@ -245,6 +245,7 @@ button:focus { outline: none; }
 .s-body { display: flex; flex-direction: column; gap: 8px; }
 .s-label { color: var(--tx-2); font-size: 13px; font-weight: 600; margin-top: 8px; }
 .s-hint { color: var(--tx-mut); font-weight: 400; font-size: 11px; margin-left: 6px; }
+.s-hint.warn { color: #ff9d8f; font-weight: 500; }
 .s-seg { display: flex; gap: 6px; }
 .s-seg button { flex: 1; padding: 8px; border-radius: var(--r-8); border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.04); color: var(--tx-2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 140ms ease; }
 .s-seg button.on { border-color: var(--accent); color: #fff; background: rgba(60,131,245,0.16); }

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('cue', {
   platform: process.platform,
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   resumeContextLimitGet: () => ipcRenderer.invoke('resume-context-limit:get'),
+  encryptionAvailableGet: () => ipcRenderer.invoke('encryption:available'),
   settingsSet: (patch) => ipcRenderer.invoke('settings:set', patch),
   shortcutSet: (name, accelerator) => ipcRenderer.invoke('shortcut:set', { name, accelerator }),
   ask: (payload) => ipcRenderer.send('ask', payload),
