@@ -56,7 +56,7 @@
     "electron-builder": "^24.13.3"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.1",
+    "@anthropic-ai/sdk": "^0.115.0",
     "@google/genai": "^0.3.0",
     "openai": "^4.73.0"
   }
