@@ -17,10 +17,11 @@ let registeredShortcuts = {}; // action name -> accelerator currently registered
 
 // Both are user-configurable (Settings); defaults preserve existing behavior/docs.
 const SHORTCUT_ACTIONS = {
-  assist: { default: 'CommandOrControl+Return', run: () => runFeature('assist', '') },
-  leetcode: { default: 'CommandOrControl+H', run: () => runFeature('leetcode', '') }
+  assist: { default: 'CommandOrControl+Return', label: 'Assist', run: () => runFeature('assist', '') },
+  leetcode: { default: 'CommandOrControl+H', label: 'Solve on screen', run: () => runFeature('leetcode', '') }
 };
 const QUIT_SHORTCUT = 'CommandOrControl+Shift+X';
+const QUIT_LABEL = 'Quit';
 
 // Ignores a second trigger for the same shortcut arriving within this window —
 // e.g. OS key-repeat, or a global shortcut and an in-app handler both firing
@@ -255,7 +256,7 @@ function registerShortcut(name, accelerator) {
 
   const collision = findCollision(next, name, currentBindings());
   if (collision) {
-    const label = collision === 'quit' ? 'Quit' : collision === 'assist' ? 'Assist' : 'Solve on screen';
+    const label = collision === 'quit' ? QUIT_LABEL : (SHORTCUT_ACTIONS[collision] && SHORTCUT_ACTIONS[collision].label) || collision;
     return { ok: false, error: 'That shortcut is already used by ' + label + '.' };
   }
 
