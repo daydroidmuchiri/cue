@@ -584,11 +584,12 @@
     SHORTCUT_TARGETS.assist.value = (settings.shortcuts && settings.shortcuts.assist) || DEFAULT_ASSIST_SHORTCUT;
     SHORTCUT_TARGETS.leetcode.value = (settings.shortcuts && settings.shortcuts.leetcode) || DEFAULT_LEETCODE_SHORTCUT;
     syncShortcutLabels();
-    if (cue.resumeContextLimit) {
+    const resumeContextLimit = await cue.resumeContextLimitGet();
+    if (resumeContextLimit) {
       const resumeEl = $('#resume-context');
       const resumeHint = $('#resume-hint');
-      if (resumeEl) resumeEl.maxLength = cue.resumeContextLimit;
-      if (resumeHint) resumeHint.textContent = 'Maximum ' + cue.resumeContextLimit.toLocaleString() + ' characters';
+      if (resumeEl) resumeEl.maxLength = resumeContextLimit;
+      if (resumeHint) resumeHint.textContent = 'Maximum ' + resumeContextLimit.toLocaleString() + ' characters';
     }
     smartBtn.classList.toggle('on', !!settings.smart);
     showExample();

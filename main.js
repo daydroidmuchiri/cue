@@ -6,7 +6,7 @@ const { captureScreenshot } = require('./src/screen');
 const { createSTT } = require('./src/stt');
 const { createLLM, withTimeout } = require('./src/llm');
 const { MODES } = require('./src/prompts');
-const { appendResumeContext } = require('./src/profile-context');
+const { appendResumeContext, MAX_RESUME_CONTEXT_CHARS } = require('./src/profile-context');
 const { rms16 } = require('./src/wav');
 const { appendTurn } = require('./src/transcript');
 const { pushCapped } = require('./src/audio-buffer');
@@ -62,7 +62,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -212,6 +212,7 @@ async function runFeature(mode, userText) {
 
 // -------- IPC --------
 ipcMain.handle('settings:get', () => store.getSettings());
+ipcMain.handle('resume-context-limit:get', () => MAX_RESUME_CONTEXT_CHARS);
 ipcMain.handle('settings:set', (_e, patch) => { sttDisabled = false; return store.setSettings(patch); });
 ipcMain.handle('shortcut:set', (_e, payload) => setShortcut(payload && payload.name, payload && payload.accelerator));
 ipcMain.handle('capture:toggle', () => setCapturing(!state.capturing));
