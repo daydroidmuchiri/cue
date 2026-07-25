@@ -219,13 +219,24 @@
   });
 
   // ---- capture: mic (renderer side) --------------------------------------
+  // micStartToken guards against rapid stop/start: it's bumped on every call
+  // to startMic() *and* stopMic(), so if a stop (or a newer start) happens
+  // while getUserMedia()/addModule() is still pending, the stale in-flight
+  // attempt notices its token is out of date and tears itself down instead of
+  // wiring up a stream nothing references anymore (a leaked, still-recording
+  // mic with no code path left to stop it).
   let audioCtx = null, micStream = null, micNode = null, micProc = null;
+  let micStartToken = 0;
   async function startMic() {
     if (micStream) return;
+    const token = ++micStartToken;
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+      if (token !== micStartToken) { stream.getTracks().forEach((t) => t.stop()); return; }
+      micStream = stream;
       audioCtx = new AudioContext({ sampleRate: 16000 });
       await audioCtx.audioWorklet.addModule('./pcm-processor.js');
+      if (token !== micStartToken) { stopMic(); return; }
       micNode = audioCtx.createMediaStreamSource(micStream);
       micProc = new AudioWorkletNode(audioCtx, 'pcm-processor');
       micProc.port.onmessage = (e) => cue.micPcm(e.data);
@@ -236,6 +247,7 @@
     }
   }
   function stopMic() {
+    micStartToken++; // invalidate any in-flight startMic()
     if (micProc) { micProc.port.onmessage = null; micProc.disconnect(); micProc = null; }
     if (micNode) { micNode.disconnect(); micNode = null; }
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
@@ -243,17 +255,22 @@
   }
 
   // ---- capture: system/meeting audio (getDisplayMedia loopback, in cue's process) ----
+  // Same stale-start guard as startMic() above, via sysStartToken.
   let sysStream = null, sysCtx = null, sysNode = null, sysProc = null;
+  let sysStartToken = 0;
   async function startSystemAudio() {
     if (sysStream) return;
+    const token = ++sysStartToken;
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      if (token !== sysStartToken) { stream.getTracks().forEach((t) => t.stop()); return; }
       stream.getVideoTracks().forEach((t) => t.stop()); // we only want the audio
       const tracks = stream.getAudioTracks();
       if (!tracks.length) { cue.log('system audio: no loopback track (macOS loopback unsupported here)'); stream.getTracks().forEach((t) => t.stop()); return; }
       sysStream = stream;
       sysCtx = new AudioContext({ sampleRate: 16000 });
       await sysCtx.audioWorklet.addModule('./pcm-processor.js');
+      if (token !== sysStartToken) { stopSystemAudio(); return; }
       sysNode = sysCtx.createMediaStreamSource(new MediaStream(tracks));
       sysProc = new AudioWorkletNode(sysCtx, 'pcm-processor');
       sysProc.port.onmessage = (e) => cue.systemPcm(e.data);
@@ -265,6 +282,7 @@
     }
   }
   function stopSystemAudio() {
+    sysStartToken++; // invalidate any in-flight startSystemAudio()
     if (sysProc) { sysProc.port.onmessage = null; sysProc.disconnect(); sysProc = null; }
     if (sysNode) { sysNode.disconnect(); sysNode = null; }
     if (sysCtx) { sysCtx.close(); sysCtx = null; }
