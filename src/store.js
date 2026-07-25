@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { app, safeStorage } = require('electron');
 const { createSettingsStore } = require('./settings-persistence');
+const { MAX_RESUME_CONTEXT_CHARS } = require('./profile-context');
 
 const FILE = path.join(app.getPath('userData'), 'cue-data.json');
 
@@ -44,7 +45,8 @@ const cipher = {
 
 const settingsStore = createSettingsStore({
   fs, filePath: FILE, cipher, defaults: DEFAULTS, secretFields: SECRET_FIELDS,
-  autoSwitchProviderKeys: SECRET_FIELDS
+  autoSwitchProviderKeys: SECRET_FIELDS,
+  maxLengths: { resumeContext: MAX_RESUME_CONTEXT_CHARS }
 });
 
 module.exports = {

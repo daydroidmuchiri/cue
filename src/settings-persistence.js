@@ -28,7 +28,11 @@ function deepMerge(base, over) {
 // cipher: { isAvailable, encrypt, decrypt } -- see secure-fields.js
 // autoSwitchProviderKeys: optional list of apiKeys keys to consider when the
 //   configured provider has no key but another one does.
-function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, autoSwitchProviderKeys }) {
+// maxLengths: optional { fieldName: number } -- top-level string fields are
+//   truncated to this length on save. The UI enforces this too (e.g. an
+//   <textarea maxlength>), but that's not a trust boundary -- any direct
+//   settings:set IPC call bypasses it, so it has to be enforced here as well.
+function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, autoSwitchProviderKeys, maxLengths }) {
   let data = null;
   let undecryptable = {}; // field -> raw on-disk string we couldn't decrypt this session
 
@@ -105,6 +109,11 @@ function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, aut
         if (typeof incomingApiKeys[f] === 'string' && incomingApiKeys[f]) delete undecryptable[f];
       }
       data = deepMerge(data, patch || {});
+      if (maxLengths) {
+        for (const f of Object.keys(maxLengths)) {
+          if (typeof data[f] === 'string' && data[f].length > maxLengths[f]) data[f] = data[f].slice(0, maxLengths[f]);
+        }
+      }
       save();
       return data;
     }

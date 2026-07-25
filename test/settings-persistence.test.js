@@ -146,3 +146,23 @@ test('auto-switches provider to one with a key when the configured provider has 
   });
   assert.equal(store.getSettings().provider, 'anthropic');
 });
+
+test('setSettings truncates a field to its configured max length', () => {
+  const fs = fakeFs();
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: { ...DEFAULTS, resumeContext: '' }, secretFields: SECRET_FIELDS,
+    maxLengths: { resumeContext: 10 }
+  });
+  store.setSettings({ resumeContext: 'a'.repeat(20) });
+  assert.equal(store.getSettings().resumeContext, 'a'.repeat(10));
+});
+
+test('a field with no configured max length is left alone', () => {
+  const fs = fakeFs();
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: { ...DEFAULTS, resumeContext: '' }, secretFields: SECRET_FIELDS,
+    maxLengths: { resumeContext: 10 }
+  });
+  store.setSettings({ provider: 'anthropic' });
+  assert.equal(store.getSettings().provider, 'anthropic');
+});
