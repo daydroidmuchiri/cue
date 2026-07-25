@@ -96,6 +96,14 @@ function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, aut
     getSettings() { return load(); },
     setSettings(patch) {
       load();
+      // A deliberate new value for a field always wins over "preserve stale
+      // ciphertext" -- otherwise a user who retypes a key that failed to
+      // decrypt this session would have their edit silently discarded (see
+      // test/settings-persistence.test.js).
+      const incomingApiKeys = (patch && patch.apiKeys) || {};
+      for (const f of Object.keys(incomingApiKeys)) {
+        if (typeof incomingApiKeys[f] === 'string' && incomingApiKeys[f]) delete undecryptable[f];
+      }
       data = deepMerge(data, patch || {});
       save();
       return data;

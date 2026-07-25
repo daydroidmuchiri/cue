@@ -73,6 +73,25 @@ test('CRITICAL: a field that fails to decrypt this session is NOT destroyed by t
   assert.equal(session3.getSettings().apiKeys.openai, 'sk-precious-real-key');
 });
 
+test('CRITICAL: a user-supplied new value for an undecryptable field is NOT discarded', () => {
+  // Session 1: original key saved successfully while the cipher is available.
+  const fs = fakeFs();
+  const session1 = createSettingsStore({ fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS });
+  session1.setSettings({ apiKeys: { openai: 'sk-OLD-KEY' } });
+
+  // Session 2: cipher unavailable this session (locked keychain / rebuilt
+  // app identity) -- the field decrypts to blank. The user notices, retypes
+  // a working key in Settings, and saves.
+  const session2 = createSettingsStore({ fs, filePath: FILE, cipher: unavailableCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS });
+  assert.equal(session2.getSettings().apiKeys.openai, '', 'field appears blank this session');
+  session2.setSettings({ apiKeys: { openai: 'sk-BRAND-NEW-KEY-USER-JUST-TYPED' } });
+
+  // Session 3: cipher available again -- the user's deliberate new value
+  // must win, not the stale ciphertext from session 1.
+  const session3 = createSettingsStore({ fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS });
+  assert.equal(session3.getSettings().apiKeys.openai, 'sk-BRAND-NEW-KEY-USER-JUST-TYPED');
+});
+
 test('a field that never had a value is unaffected by an unavailable cipher', () => {
   const fs = fakeFs();
   const store = createSettingsStore({ fs, filePath: FILE, cipher: unavailableCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS });
