@@ -11,6 +11,7 @@ const { rms16 } = require('./src/wav');
 const { appendTurn } = require('./src/transcript');
 const { pushCapped } = require('./src/audio-buffer');
 const { normalizeShortcut, findCollision, createTriggerGuard } = require('./src/shortcuts');
+const { isAllowedExternalUrl } = require('./src/safe-open');
 
 // Two cue processes would otherwise both register the same global shortcuts
 // (only one wins, silently) and both read/write cue-data.json with no
@@ -260,7 +261,7 @@ safeOn('ask', (_e, payload) => runFeature(payload.mode, payload.text));
 safeOn('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) pushCapped(buffers.you, Buffer.from(arrayBuffer)); });
 safeOn('system:pcm', (_e, arrayBuffer) => { if (state.capturing) pushCapped(buffers.them, Buffer.from(arrayBuffer)); });
 safeOn('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
-safeOn('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
+safeOn('open-pane', (_e, url) => { if (isAllowedExternalUrl(url)) shell.openExternal(url).catch(() => {}); });
 safeOn('log', (_e, msg) => console.log('[renderer]', msg));
 
 // -------- shortcuts --------
