@@ -85,6 +85,11 @@ function createWindow() {
 
   win.webContents.on('did-finish-load', () => win.showInactive());
   win.webContents.on('render-process-gone', (_e, d) => console.log('[cue] renderer gone', JSON.stringify(d)));
+  // These two are the only signal we get if the window ends up silently blank:
+  // it's frameless, transparent, and click-through by default, so a preload or
+  // page-load failure otherwise looks exactly like "the app didn't open."
+  win.webContents.on('preload-error', (_e, preloadPath, error) => console.log('[cue] preload error', preloadPath, error && error.stack));
+  win.webContents.on('did-fail-load', (_e, code, desc) => console.log('[cue] page failed to load', code, desc));
 }
 
 // -------- STT flushing --------
