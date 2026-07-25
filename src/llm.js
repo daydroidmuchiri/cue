@@ -68,10 +68,9 @@ function withTimeout(promise, ms, controller) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function streamOpenAI({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, baseURL, extraHeaders, signal }) {
+async function streamOpenAI({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, baseURL, extraHeaders, signal, OpenAIClient }) {
   if (DEBUG) console.log('[DEBUG LLM] streamOpenAI called', { model, baseURL, hasImage: !!imageDataUrl, maxTokens });
-  const OpenAI = require('openai');
-  const client = new OpenAI({ apiKey, baseURL, defaultHeaders: extraHeaders });
+  const client = new OpenAIClient({ apiKey, baseURL, defaultHeaders: extraHeaders });
   const messages = [{ role: 'system', content: system }];
   turns.forEach((t, i) => {
     const last = i === turns.length - 1;
@@ -100,10 +99,9 @@ async function streamOpenAI({ apiKey, model, system, turns, imageDataUrl, maxTok
   }
 }
 
-async function streamAnthropic({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, signal }) {
+async function streamAnthropic({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, signal, AnthropicClient }) {
   if (DEBUG) console.log('[DEBUG LLM] streamAnthropic called', { model, hasImage: !!imageDataUrl, maxTokens });
-  const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey });
+  const client = new AnthropicClient({ apiKey });
   const messages = turns.map((t, i) => {
     const last = i === turns.length - 1;
     if (last && imageDataUrl && t.role === 'user') {
@@ -133,10 +131,9 @@ async function streamAnthropic({ apiKey, model, system, turns, imageDataUrl, max
 // The @google/genai SDK has no AbortSignal support on generateContentStream, so
 // `signal` here only guards our own wait (via withTimeout) — the underlying HTTP
 // request may keep running server-side after we've given up on it.
-async function streamGemini({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken }) {
+async function streamGemini({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, GoogleGenAIClient }) {
   if (DEBUG) console.log('[DEBUG LLM] streamGemini called', { model, hasImage: !!imageDataUrl, maxTokens });
-  const { GoogleGenAI } = require('@google/genai');
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAIClient({ apiKey });
   const contents = turns.map((t, i) => {
     const last = i === turns.length - 1;
     const parts = [{ text: t.text }];
@@ -168,7 +165,12 @@ async function streamGemini({ apiKey, model, system, turns, imageDataUrl, maxTok
   }
 }
 
-function createLLM(settings) {
+// clients: optional SDK constructor overrides, {OpenAIClient, AnthropicClient,
+// GoogleGenAIClient} -- lazily defaults to the real SDKs so production
+// callers (main.js) don't need to know this seam exists. Tests inject fakes
+// here instead of hitting the network, since these constructors are the only
+// place the real provider SDKs enter the picture.
+function createLLM(settings, clients = {}) {
   const provider = settings.provider;
   const keys = settings.apiKeys || {};
   const apiKey = keys[provider];
@@ -192,7 +194,8 @@ function createLLM(settings) {
             ...args,
             onToken: (t) => { emittedAny = true; args.onToken(t); },
             baseURL: resolveBaseURL(provider),
-            extraHeaders: provider === 'openrouter' ? OPENROUTER_HEADERS : undefined
+            extraHeaders: provider === 'openrouter' ? OPENROUTER_HEADERS : undefined,
+            OpenAIClient: clients.OpenAIClient || require('openai')
           };
           try {
             return await streamOpenAI(openAIArgs);
@@ -207,8 +210,12 @@ function createLLM(settings) {
             throw err;
           }
         }
-        if (provider === 'anthropic') return streamAnthropic(args);
-        if (provider === 'gemini') return streamGemini(args);
+        if (provider === 'anthropic') {
+          return streamAnthropic({ ...args, AnthropicClient: clients.AnthropicClient || require('@anthropic-ai/sdk') });
+        }
+        if (provider === 'gemini') {
+          return streamGemini({ ...args, GoogleGenAIClient: clients.GoogleGenAIClient || require('@google/genai').GoogleGenAI });
+        }
         return Promise.reject(new Error('unknown provider: ' + provider));
       };
       return withTimeout(run(), REQUEST_TIMEOUT_MS, controller);
