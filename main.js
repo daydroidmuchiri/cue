@@ -153,6 +153,12 @@ function stopFlushLoop() { if (flushTimer) { clearInterval(flushTimer); flushTim
 function setCapturing(active) {
   state.capturing = active;
   if (active) {
+    // A fresh "start listening" is an implicit "try again" signal -- without
+    // this, one transient STT error (a wifi blip, a sleep/wake cycle) leaves
+    // listening silently, permanently dead for the rest of the session even
+    // after connectivity recovers, since sttDisabled only ever gets cleared
+    // by the user happening to open and save Settings.
+    sttDisabled = false;
     startFlushLoop();
   } else {
     stopFlushLoop();
