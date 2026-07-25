@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { withTimeout, createLLM, resolveBaseURL, isRetriableOpenRouterError, OPENROUTER_FREE_MODEL, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS } = require('../src/llm');
+const { withTimeout, createLLM, resolveBaseURL, isRetriableOpenRouterError, shouldRetryWithFreeRouter, OPENROUTER_FREE_MODEL, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS } = require('../src/llm');
 
 test('withTimeout resolves normally when the promise settles first', async () => {
   const result = await withTimeout(Promise.resolve('ok'), 50, new AbortController());
@@ -94,6 +94,34 @@ test('isRetriableOpenRouterError is false for timeouts/aborts (no HTTP status)',
 
 test('isRetriableOpenRouterError is false for no error', () => {
   assert.equal(isRetriableOpenRouterError(null), false);
+});
+
+test('shouldRetryWithFreeRouter is true for a fresh, retriable failure on openrouter', () => {
+  const ok = shouldRetryWithFreeRouter({ provider: 'openrouter', model: 'some/model:free', emittedAny: false, err: { status: 404 } });
+  assert.equal(ok, true);
+});
+
+test('CRITICAL: shouldRetryWithFreeRouter is false once any token has already streamed', () => {
+  // Retrying after partial output would concatenate a second model's full
+  // response onto the first model's partial one in the same UI bubble, with
+  // no separator and no indication a retry happened -- garbled output.
+  const ok = shouldRetryWithFreeRouter({ provider: 'openrouter', model: 'some/model:free', emittedAny: true, err: { status: 429 } });
+  assert.equal(ok, false);
+});
+
+test('shouldRetryWithFreeRouter is false for other providers even on a retriable-shaped error', () => {
+  const ok = shouldRetryWithFreeRouter({ provider: 'nvidia', model: 'some/model', emittedAny: false, err: { status: 404 } });
+  assert.equal(ok, false);
+});
+
+test('shouldRetryWithFreeRouter is false when already on the free router (avoid retrying into itself)', () => {
+  const ok = shouldRetryWithFreeRouter({ provider: 'openrouter', model: OPENROUTER_FREE_MODEL, emittedAny: false, err: { status: 404 } });
+  assert.equal(ok, false);
+});
+
+test('shouldRetryWithFreeRouter is false for a non-retriable error even with no tokens emitted', () => {
+  const ok = shouldRetryWithFreeRouter({ provider: 'openrouter', model: 'some/model:free', emittedAny: false, err: { status: 401 } });
+  assert.equal(ok, false);
 });
 
 test('OPENROUTER_FREE_MODEL is the stable router id used as a retry target', () => {
