@@ -4,23 +4,32 @@ const path = require('path');
 const store = require('./src/store');
 const { captureScreenshot } = require('./src/screen');
 const { createSTT } = require('./src/stt');
-const { createLLM } = require('./src/llm');
+const { createLLM, withTimeout } = require('./src/llm');
 const { MODES } = require('./src/prompts');
-const { appendResumeContext } = require('./src/profile-context');
+const { appendResumeContext, MAX_RESUME_CONTEXT_CHARS } = require('./src/profile-context');
 const { rms16 } = require('./src/wav');
 const { appendTurn } = require('./src/transcript');
 const { pushCapped } = require('./src/audio-buffer');
 const { normalizeShortcut, findCollision, createTriggerGuard } = require('./src/shortcuts');
+
+// Two cue processes would otherwise both register the same global shortcuts
+// (only one wins, silently) and both read/write cue-data.json with no
+// cross-process locking, so a losing writer's settings save can be dropped.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  return;
+}
 
 let win = null;
 let registeredShortcuts = {}; // action name -> accelerator currently registered
 
 // Both are user-configurable (Settings); defaults preserve existing behavior/docs.
 const SHORTCUT_ACTIONS = {
-  assist: { default: 'CommandOrControl+Return', run: () => runFeature('assist', '') },
-  leetcode: { default: 'CommandOrControl+H', run: () => runFeature('leetcode', '') }
+  assist: { default: 'CommandOrControl+Return', label: 'Assist', run: () => runFeature('assist', '') },
+  leetcode: { default: 'CommandOrControl+H', label: 'Solve on screen', run: () => runFeature('leetcode', '') }
 };
 const QUIT_SHORTCUT = 'CommandOrControl+Shift+X';
+const QUIT_LABEL = 'Quit';
 
 // Ignores a second trigger for the same shortcut arriving within this window —
 // e.g. OS key-repeat, or a global shortcut and an in-app handler both firing
@@ -36,6 +45,9 @@ const FLUSH_MS = 3500;
 const MIN_BYTES = Math.floor(16000 * 2 * 0.6); // ~0.6s
 const RMS_GATE = 240;
 let flushTimer = null;
+// Safety net so a stuck OS permission dialog / desktopCapturer hang (no
+// AbortSignal support there) can't leave state.busy true forever.
+const SCREENSHOT_TIMEOUT_MS = 15000;
 
 function send(channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 
@@ -59,7 +71,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -82,6 +94,11 @@ function createWindow() {
 
   win.webContents.on('did-finish-load', () => win.showInactive());
   win.webContents.on('render-process-gone', (_e, d) => console.log('[cue] renderer gone', JSON.stringify(d)));
+  // These two are the only signal we get if the window ends up silently blank:
+  // it's frameless, transparent, and click-through by default, so a preload or
+  // page-load failure otherwise looks exactly like "the app didn't open."
+  win.webContents.on('preload-error', (_e, preloadPath, error) => console.log('[cue] preload error', preloadPath, error && error.stack));
+  win.webContents.on('did-fail-load', (_e, code, desc) => console.log('[cue] page failed to load', code, desc));
 }
 
 // -------- STT flushing --------
@@ -145,6 +162,12 @@ function stopFlushLoop() { if (flushTimer) { clearInterval(flushTimer); flushTim
 function setCapturing(active) {
   state.capturing = active;
   if (active) {
+    // A fresh "start listening" is an implicit "try again" signal -- without
+    // this, one transient STT error (a wifi blip, a sleep/wake cycle) leaves
+    // listening silently, permanently dead for the rest of the session even
+    // after connectivity recovers, since sttDisabled only ever gets cleared
+    // by the user happening to open and save Settings.
+    sttDisabled = false;
     startFlushLoop();
   } else {
     stopFlushLoop();
@@ -180,13 +203,13 @@ async function runFeature(mode, userText) {
     let imageDataUrl = null;
     if (def.needsScreen) {
       if (DEBUG) console.log('[DEBUG MAIN] Feature needs screen. Capturing screenshot...');
-      try { 
-        imageDataUrl = await captureScreenshot(); 
+      try {
+        imageDataUrl = await withTimeout(captureScreenshot(), SCREENSHOT_TIMEOUT_MS, null);
         if (DEBUG) console.log('[DEBUG MAIN] Screenshot captured successfully (length:', imageDataUrl.length, ')');
       }
-      catch (e) { 
+      catch (e) {
         if (DEBUG) console.error('[DEBUG MAIN] Screenshot capture failed:', e);
-        send('status', { message: 'Screen capture needs permission — grant Screen Recording to cue in System Settings.' }); 
+        send('status', { message: 'Screen capture failed or timed out — grant Screen Recording permission to cue in System Settings, then try again.' });
       }
     }
 
@@ -209,6 +232,8 @@ async function runFeature(mode, userText) {
 
 // -------- IPC --------
 ipcMain.handle('settings:get', () => store.getSettings());
+ipcMain.handle('resume-context-limit:get', () => MAX_RESUME_CONTEXT_CHARS);
+ipcMain.handle('encryption:available', () => store.isEncryptionAvailable());
 ipcMain.handle('settings:set', (_e, patch) => { sttDisabled = false; return store.setSettings(patch); });
 ipcMain.handle('shortcut:set', (_e, payload) => setShortcut(payload && payload.name, payload && payload.accelerator));
 ipcMain.handle('capture:toggle', () => setCapturing(!state.capturing));
@@ -240,7 +265,7 @@ function registerShortcut(name, accelerator) {
 
   const collision = findCollision(next, name, currentBindings());
   if (collision) {
-    const label = collision === 'quit' ? 'Quit' : collision === 'assist' ? 'Assist' : 'Solve on screen';
+    const label = collision === 'quit' ? QUIT_LABEL : (SHORTCUT_ACTIONS[collision] && SHORTCUT_ACTIONS[collision].label) || collision;
     return { ok: false, error: 'That shortcut is already used by ' + label + '.' };
   }
 
@@ -285,12 +310,28 @@ function registerShortcuts() {
 }
 
 // -------- lifecycle --------
+// A second launch attempt (double-click, launch-at-login race, a relaunch
+// script) fires this in the original process instead of creating a second
+// one -- bring the existing overlay to the front rather than leaving a
+// duplicate process silently unable to register its shortcuts.
+app.on('second-instance', () => {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
 
+  // Scoped to cue's own window, not just the permission type -- otherwise any
+  // WebContents that ever shares the default session (a future <webview>,
+  // devtools, an accidental remote navigation) would get mic/screen access
+  // with zero prompt, regardless of where it came from.
   const allowMedia = (permission) => permission === 'media' || permission === 'microphone' || permission === 'audioCapture' || permission === 'display-capture';
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(allowMedia(permission)));
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowMedia(permission));
+  const isOwnWindow = (wc) => !!(win && wc && wc.id === win.webContents.id);
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => cb(isOwnWindow(wc) && allowMedia(permission)));
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => isOwnWindow(wc) && allowMedia(permission));
 
   // System-audio loopback for getDisplayMedia: hand back a screen source with 'loopback'
   // audio so the renderer can capture what's playing (Zoom/Meet) using cue's own grant.

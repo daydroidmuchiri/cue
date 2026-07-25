@@ -1,12 +1,16 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
-const { MAX_RESUME_CONTEXT_CHARS } = require('./src/profile-context');
 
+// Sandboxed preload scripts (webPreferences.sandbox: true) can't resolve local
+// project requires like './src/profile-context' — only main has full Node
+// module resolution. resumeContextLimit is delivered via the settings:get IPC
+// response instead (see main.js) rather than required directly here.
 contextBridge.exposeInMainWorld('cue', {
   setZoomLevel: (level) => webFrame.setZoomLevel(level),
   getZoomLevel: () => webFrame.getZoomLevel(),
   platform: process.platform,
-  resumeContextLimit: MAX_RESUME_CONTEXT_CHARS,
   settingsGet: () => ipcRenderer.invoke('settings:get'),
+  resumeContextLimitGet: () => ipcRenderer.invoke('resume-context-limit:get'),
+  encryptionAvailableGet: () => ipcRenderer.invoke('encryption:available'),
   settingsSet: (patch) => ipcRenderer.invoke('settings:set', patch),
   shortcutSet: (name, accelerator) => ipcRenderer.invoke('shortcut:set', { name, accelerator }),
   ask: (payload) => ipcRenderer.send('ask', payload),

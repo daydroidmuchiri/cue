@@ -41,6 +41,15 @@ function isRetriableOpenRouterError(err) {
   return !!err && (err.status === 400 || err.status === 404 || err.status === 429);
 }
 
+// Gates the fallback retry. Critically: `emittedAny` must be false -- if the
+// primary model already streamed some tokens before failing, retrying would
+// concatenate a second model's full response onto the first one's partial
+// output in the same UI bubble, with no separator and no indication a retry
+// happened. Safer to surface the error than risk garbled output.
+function shouldRetryWithFreeRouter({ provider, model, emittedAny, err }) {
+  return provider === 'openrouter' && model !== OPENROUTER_FREE_MODEL && !emittedAny && isRetriableOpenRouterError(err);
+}
+
 function stripDataUrl(dataUrl) {
   const m = /^data:(.+?);base64,(.*)$/s.exec(dataUrl || '');
   return m ? { mime: m[1], b64: m[2] } : null;
@@ -178,8 +187,10 @@ function createLLM(settings) {
       const args = { apiKey, model, maxTokens, signal: controller.signal, ...params };
       const run = async () => {
         if (provider === 'openai' || provider === 'nvidia' || provider === 'openrouter') {
+          let emittedAny = false;
           const openAIArgs = {
             ...args,
+            onToken: (t) => { emittedAny = true; args.onToken(t); },
             baseURL: resolveBaseURL(provider),
             extraHeaders: provider === 'openrouter' ? OPENROUTER_HEADERS : undefined
           };
@@ -189,7 +200,8 @@ function createLLM(settings) {
             // The chosen model is unusable right now (rotated out of the catalog,
             // or its free-tier provider is rate-limited) — retry once against
             // OpenRouter's own free-model router instead of failing outright.
-            if (provider === 'openrouter' && model !== OPENROUTER_FREE_MODEL && isRetriableOpenRouterError(err)) {
+            // Only if nothing has streamed yet -- see shouldRetryWithFreeRouter.
+            if (shouldRetryWithFreeRouter({ provider, model, emittedAny, err })) {
               return await streamOpenAI({ ...openAIArgs, model: OPENROUTER_FREE_MODEL });
             }
             throw err;
@@ -204,4 +216,4 @@ function createLLM(settings) {
   };
 }
 
-module.exports = { createLLM, withTimeout, resolveBaseURL, isRetriableOpenRouterError, OPENROUTER_FREE_MODEL, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS };
+module.exports = { createLLM, withTimeout, resolveBaseURL, isRetriableOpenRouterError, shouldRetryWithFreeRouter, OPENROUTER_FREE_MODEL, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS };

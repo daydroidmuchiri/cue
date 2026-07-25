@@ -1,4 +1,28 @@
 /* cue renderer — UI state, mic capture, IPC, streaming render. */
+
+// Registered first, before anything below can throw. The window is frameless,
+// transparent, and click-through by default, so an uncaught boot-time error
+// otherwise renders as an invisible, silent "the app didn't open" — this makes
+// the failure visible and reports it to main's console via preload's log(),
+// when preload itself is the thing that succeeded.
+(function installFatalErrorBoundary() {
+  let shown = false;
+  function showFatalError(err) {
+    if (shown) return;
+    shown = true;
+    try {
+      const message = (err && (err.stack || err.message)) || String(err);
+      document.documentElement.style.background = 'transparent';
+      document.body.innerHTML = '';
+      document.body.style.cssText = 'background:#1a1a1a;color:#f5f5f5;font:12px/1.5 -apple-system,Segoe UI,sans-serif;padding:16px;white-space:pre-wrap;';
+      document.body.textContent = 'cue failed to start:\n' + message;
+      if (window.cue && typeof window.cue.log === 'function') window.cue.log('[fatal] ' + message);
+    } catch (_) { /* nothing more we can do from here */ }
+  }
+  window.addEventListener('error', (e) => showFatalError(e.error || e.message));
+  window.addEventListener('unhandledrejection', (e) => showFatalError(e.reason));
+})();
+
 (function () {
   const { icon } = window.ICONS;
   const cue = window.cue; // exposed by preload
@@ -195,13 +219,24 @@
   });
 
   // ---- capture: mic (renderer side) --------------------------------------
+  // micStartToken guards against rapid stop/start: it's bumped on every call
+  // to startMic() *and* stopMic(), so if a stop (or a newer start) happens
+  // while getUserMedia()/addModule() is still pending, the stale in-flight
+  // attempt notices its token is out of date and tears itself down instead of
+  // wiring up a stream nothing references anymore (a leaked, still-recording
+  // mic with no code path left to stop it).
   let audioCtx = null, micStream = null, micNode = null, micProc = null;
+  let micStartToken = 0;
   async function startMic() {
     if (micStream) return;
+    const token = ++micStartToken;
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+      if (token !== micStartToken) { stream.getTracks().forEach((t) => t.stop()); return; }
+      micStream = stream;
       audioCtx = new AudioContext({ sampleRate: 16000 });
       await audioCtx.audioWorklet.addModule('./pcm-processor.js');
+      if (token !== micStartToken) { stopMic(); return; }
       micNode = audioCtx.createMediaStreamSource(micStream);
       micProc = new AudioWorkletNode(audioCtx, 'pcm-processor');
       micProc.port.onmessage = (e) => cue.micPcm(e.data);
@@ -212,6 +247,7 @@
     }
   }
   function stopMic() {
+    micStartToken++; // invalidate any in-flight startMic()
     if (micProc) { micProc.port.onmessage = null; micProc.disconnect(); micProc = null; }
     if (micNode) { micNode.disconnect(); micNode = null; }
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
@@ -219,17 +255,22 @@
   }
 
   // ---- capture: system/meeting audio (getDisplayMedia loopback, in cue's process) ----
+  // Same stale-start guard as startMic() above, via sysStartToken.
   let sysStream = null, sysCtx = null, sysNode = null, sysProc = null;
+  let sysStartToken = 0;
   async function startSystemAudio() {
     if (sysStream) return;
+    const token = ++sysStartToken;
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      if (token !== sysStartToken) { stream.getTracks().forEach((t) => t.stop()); return; }
       stream.getVideoTracks().forEach((t) => t.stop()); // we only want the audio
       const tracks = stream.getAudioTracks();
       if (!tracks.length) { cue.log('system audio: no loopback track (macOS loopback unsupported here)'); stream.getTracks().forEach((t) => t.stop()); return; }
       sysStream = stream;
       sysCtx = new AudioContext({ sampleRate: 16000 });
       await sysCtx.audioWorklet.addModule('./pcm-processor.js');
+      if (token !== sysStartToken) { stopSystemAudio(); return; }
       sysNode = sysCtx.createMediaStreamSource(new MediaStream(tracks));
       sysProc = new AudioWorkletNode(sysCtx, 'pcm-processor');
       sysProc.port.onmessage = (e) => cue.systemPcm(e.data);
@@ -241,6 +282,7 @@
     }
   }
   function stopSystemAudio() {
+    sysStartToken++; // invalidate any in-flight startSystemAudio()
     if (sysProc) { sysProc.port.onmessage = null; sysProc.disconnect(); sysProc = null; }
     if (sysNode) { sysNode.disconnect(); sysNode = null; }
     if (sysCtx) { sysCtx.close(); sysCtx = null; }
@@ -283,6 +325,19 @@
 
   // ---- settings ----------------------------------------------------------
   const scrim = $('#settings-scrim');
+  // Set once at boot (src/store.js's cipher.isAvailable() doesn't change mid-session).
+  // Settings must never claim "encrypted at rest" when the OS-level cipher isn't
+  // actually available -- keys would otherwise be written to cue-data.json in
+  // plaintext with no indication to the user.
+  let encryptionAvailable = true;
+  function syncEncryptionHint() {
+    const hint = $('#key-encryption-hint');
+    if (!hint) return;
+    hint.textContent = encryptionAvailable
+      ? 'stored locally, encrypted at rest'
+      : 'stored locally — NOT encrypted on this system (OS keychain unavailable)';
+    hint.classList.toggle('warn', !encryptionAvailable);
+  }
   function openSettings() { fillSettings(); scrim.classList.remove('hidden'); }
   function closeSettings() { cancelShortcutRecording(); saveSettings(); scrim.classList.add('hidden'); }
   $('#more-btn').addEventListener('click', openSettings);
@@ -300,6 +355,7 @@
     const m = settings.models[settings.provider] || { fast: '', smart: '' };
     $('#model-fast').value = m.fast; $('#model-smart').value = m.smart;
     syncShortcutLabels();
+    syncEncryptionHint();
     $('#s-status').textContent = statusText();
   }
   $('#clear-resume').addEventListener('click', async () => {
@@ -542,11 +598,13 @@
     SHORTCUT_TARGETS.assist.value = (settings.shortcuts && settings.shortcuts.assist) || DEFAULT_ASSIST_SHORTCUT;
     SHORTCUT_TARGETS.leetcode.value = (settings.shortcuts && settings.shortcuts.leetcode) || DEFAULT_LEETCODE_SHORTCUT;
     syncShortcutLabels();
-    if (cue.resumeContextLimit) {
+    encryptionAvailable = await cue.encryptionAvailableGet();
+    const resumeContextLimit = await cue.resumeContextLimitGet();
+    if (resumeContextLimit) {
       const resumeEl = $('#resume-context');
       const resumeHint = $('#resume-hint');
-      if (resumeEl) resumeEl.maxLength = cue.resumeContextLimit;
-      if (resumeHint) resumeHint.textContent = 'Maximum ' + cue.resumeContextLimit.toLocaleString() + ' characters';
+      if (resumeEl) resumeEl.maxLength = resumeContextLimit;
+      if (resumeHint) resumeHint.textContent = 'Maximum ' + resumeContextLimit.toLocaleString() + ' characters';
     }
     smartBtn.classList.toggle('on', !!settings.smart);
     showExample();
