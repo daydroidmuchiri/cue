@@ -20,6 +20,15 @@ if (!app.requestSingleInstanceLock()) {
   return;
 }
 
+// Last-resort safety net: the window is frameless, transparent, and
+// click-through by default, so an uncaught exception anywhere in the main
+// process otherwise crashes the whole invisible overlay with zero visible
+// symptom and no trace beyond a terminal neither the user nor we can see in
+// production. Log and keep running rather than let Node's default behavior
+// (print to stderr and exit) silently kill the app.
+process.on('uncaughtException', (err) => console.log('[cue] uncaught exception', err && err.stack));
+process.on('unhandledRejection', (reason) => console.log('[cue] unhandled rejection', reason && reason.stack || reason));
+
 let win = null;
 let registeredShortcuts = {}; // action name -> accelerator currently registered
 
@@ -238,12 +247,21 @@ ipcMain.handle('settings:set', (_e, patch) => { sttDisabled = false; return stor
 ipcMain.handle('shortcut:set', (_e, payload) => setShortcut(payload && payload.name, payload && payload.accelerator));
 ipcMain.handle('capture:toggle', () => setCapturing(!state.capturing));
 ipcMain.handle('capture:state', () => ({ active: state.capturing }));
-ipcMain.on('ask', (_e, payload) => runFeature(payload.mode, payload.text));
-ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) pushCapped(buffers.you, Buffer.from(arrayBuffer)); });
-ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) pushCapped(buffers.them, Buffer.from(arrayBuffer)); });
-ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
-ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
-ipcMain.on('log', (_e, msg) => console.log('[renderer]', msg));
+// ipcMain.on (fire-and-forget) has no built-in error handling, unlike
+// .handle -- a synchronous throw here would otherwise surface as an
+// uncaught exception. safeOn logs it with the channel name instead.
+function safeOn(channel, handler) {
+  ipcMain.on(channel, (event, ...args) => {
+    try { handler(event, ...args); }
+    catch (e) { console.log('[cue] ipc handler error', channel, e && e.stack); }
+  });
+}
+safeOn('ask', (_e, payload) => runFeature(payload.mode, payload.text));
+safeOn('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) pushCapped(buffers.you, Buffer.from(arrayBuffer)); });
+safeOn('system:pcm', (_e, arrayBuffer) => { if (state.capturing) pushCapped(buffers.them, Buffer.from(arrayBuffer)); });
+safeOn('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
+safeOn('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
+safeOn('log', (_e, msg) => console.log('[renderer]', msg));
 
 // -------- shortcuts --------
 // Bindings currently in effect, keyed the same way findCollision expects
