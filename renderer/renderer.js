@@ -1,4 +1,28 @@
 /* cue renderer — UI state, mic capture, IPC, streaming render. */
+
+// Registered first, before anything below can throw. The window is frameless,
+// transparent, and click-through by default, so an uncaught boot-time error
+// otherwise renders as an invisible, silent "the app didn't open" — this makes
+// the failure visible and reports it to main's console via preload's log(),
+// when preload itself is the thing that succeeded.
+(function installFatalErrorBoundary() {
+  let shown = false;
+  function showFatalError(err) {
+    if (shown) return;
+    shown = true;
+    try {
+      const message = (err && (err.stack || err.message)) || String(err);
+      document.documentElement.style.background = 'transparent';
+      document.body.innerHTML = '';
+      document.body.style.cssText = 'background:#1a1a1a;color:#f5f5f5;font:12px/1.5 -apple-system,Segoe UI,sans-serif;padding:16px;white-space:pre-wrap;';
+      document.body.textContent = 'cue failed to start:\n' + message;
+      if (window.cue && typeof window.cue.log === 'function') window.cue.log('[fatal] ' + message);
+    } catch (_) { /* nothing more we can do from here */ }
+  }
+  window.addEventListener('error', (e) => showFatalError(e.error || e.message));
+  window.addEventListener('unhandledrejection', (e) => showFatalError(e.reason));
+})();
+
 (function () {
   const { icon } = window.ICONS;
   const cue = window.cue; // exposed by preload
