@@ -17,19 +17,28 @@ function encryptFields(obj, fields, cipher) {
   return out;
 }
 
+// Returns { values, failed } — `values` has the same shape as encryptFields'
+// input (decrypted where possible, blanked where not), and `failed` lists
+// which fields were encrypted-on-disk but couldn't be decrypted this session
+// (wrong machine/keychain, or cipher currently unavailable). Callers that
+// persist `values` back to disk should special-case `failed` fields rather
+// than writing the blanked value over the original ciphertext — see
+// src/settings-persistence.js.
 function decryptFields(obj, fields, cipher) {
-  const out = { ...obj };
+  const values = { ...obj };
+  const failed = [];
   for (const f of fields) {
-    const v = out[f];
+    const v = values[f];
     if (typeof v !== 'string' || !v.startsWith(ENC_PREFIX)) continue;
-    if (!cipher || !cipher.isAvailable()) { out[f] = ''; continue; }
+    if (!cipher || !cipher.isAvailable()) { values[f] = ''; failed.push(f); continue; }
     try {
-      out[f] = cipher.decrypt(Buffer.from(v.slice(ENC_PREFIX.length), 'base64'));
+      values[f] = cipher.decrypt(Buffer.from(v.slice(ENC_PREFIX.length), 'base64'));
     } catch {
-      out[f] = ''; // undecryptable (different machine/keychain) -- drop rather than crash
+      values[f] = ''; // undecryptable (different machine/keychain) -- blank in memory
+      failed.push(f);
     }
   }
-  return out;
+  return { values, failed };
 }
 
 module.exports = { encryptFields, decryptFields, ENC_PREFIX };

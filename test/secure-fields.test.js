@@ -19,8 +19,9 @@ test('encryptFields wraps plaintext values with the encrypted marker', () => {
 test('encryptFields + decryptFields round-trip back to the original value', () => {
   const cipher = fakeCipher();
   const enc = encryptFields({ apiKey: 'sk-12345' }, ['apiKey'], cipher);
-  const dec = decryptFields(enc, ['apiKey'], cipher);
-  assert.equal(dec.apiKey, 'sk-12345');
+  const { values, failed } = decryptFields(enc, ['apiKey'], cipher);
+  assert.equal(values.apiKey, 'sk-12345');
+  assert.deepEqual(failed, []);
 });
 
 test('encryptFields skips empty strings', () => {
@@ -35,21 +36,29 @@ test('encryptFields is a no-op when the cipher is unavailable, preserving plaint
 });
 
 test('decryptFields leaves legacy plaintext values (no marker) untouched', () => {
-  const out = decryptFields({ a: 'plain-legacy-key' }, ['a'], fakeCipher());
-  assert.equal(out.a, 'plain-legacy-key');
+  const { values, failed } = decryptFields({ a: 'plain-legacy-key' }, ['a'], fakeCipher());
+  assert.equal(values.a, 'plain-legacy-key');
+  assert.deepEqual(failed, []); // never attempted -- not marked as a decrypt failure
 });
 
-test('decryptFields blanks a value it cannot decrypt instead of throwing', () => {
+test('decryptFields blanks a value it cannot decrypt instead of throwing, and reports it as failed', () => {
   const badCipher = { isAvailable: () => true, decrypt: () => { throw new Error('wrong keychain'); } };
   const enc = encryptFields({ a: 'secret' }, ['a'], fakeCipher());
-  const out = decryptFields(enc, ['a'], badCipher);
-  assert.equal(out.a, '');
+  const { values, failed } = decryptFields(enc, ['a'], badCipher);
+  assert.equal(values.a, '');
+  assert.deepEqual(failed, ['a']);
 });
 
-test('decryptFields blanks an encrypted value when the cipher is currently unavailable', () => {
+test('decryptFields blanks an encrypted value when the cipher is currently unavailable, and reports it as failed', () => {
   const enc = encryptFields({ a: 'secret' }, ['a'], fakeCipher());
-  const out = decryptFields(enc, ['a'], { isAvailable: () => false });
-  assert.equal(out.a, '');
+  const { values, failed } = decryptFields(enc, ['a'], { isAvailable: () => false });
+  assert.equal(values.a, '');
+  assert.deepEqual(failed, ['a']);
+});
+
+test('decryptFields does not report a field as failed when it was never encrypted', () => {
+  const { failed } = decryptFields({ a: '', b: 'plain' }, ['a', 'b'], fakeCipher());
+  assert.deepEqual(failed, []);
 });
 
 test('encryptFields does not mutate the original object', () => {
