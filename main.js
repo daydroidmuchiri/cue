@@ -304,9 +304,14 @@ function registerShortcuts() {
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
 
+  // Scoped to cue's own window, not just the permission type -- otherwise any
+  // WebContents that ever shares the default session (a future <webview>,
+  // devtools, an accidental remote navigation) would get mic/screen access
+  // with zero prompt, regardless of where it came from.
   const allowMedia = (permission) => permission === 'media' || permission === 'microphone' || permission === 'audioCapture' || permission === 'display-capture';
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(allowMedia(permission)));
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowMedia(permission));
+  const isOwnWindow = (wc) => !!(win && wc && wc.id === win.webContents.id);
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => cb(isOwnWindow(wc) && allowMedia(permission)));
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => isOwnWindow(wc) && allowMedia(permission));
 
   // System-audio loopback for getDisplayMedia: hand back a screen source with 'loopback'
   // audio so the renderer can capture what's playing (Zoom/Meet) using cue's own grant.
