@@ -81,7 +81,11 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      // DevTools would expose the Settings DOM (plaintext API keys render into
+      // its inputs while open) to anyone with local access to a packaged
+      // build. Left enabled under `npm start` so contributors can still debug.
+      devTools: !app.isPackaged
     }
   });
 
