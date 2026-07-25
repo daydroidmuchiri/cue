@@ -4,7 +4,7 @@ const path = require('path');
 const store = require('./src/store');
 const { captureScreenshot } = require('./src/screen');
 const { createSTT } = require('./src/stt');
-const { createLLM } = require('./src/llm');
+const { createLLM, withTimeout } = require('./src/llm');
 const { MODES } = require('./src/prompts');
 const { appendResumeContext } = require('./src/profile-context');
 const { rms16 } = require('./src/wav');
@@ -36,6 +36,9 @@ const FLUSH_MS = 3500;
 const MIN_BYTES = Math.floor(16000 * 2 * 0.6); // ~0.6s
 const RMS_GATE = 240;
 let flushTimer = null;
+// Safety net so a stuck OS permission dialog / desktopCapturer hang (no
+// AbortSignal support there) can't leave state.busy true forever.
+const SCREENSHOT_TIMEOUT_MS = 15000;
 
 function send(channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 
@@ -180,13 +183,13 @@ async function runFeature(mode, userText) {
     let imageDataUrl = null;
     if (def.needsScreen) {
       if (DEBUG) console.log('[DEBUG MAIN] Feature needs screen. Capturing screenshot...');
-      try { 
-        imageDataUrl = await captureScreenshot(); 
+      try {
+        imageDataUrl = await withTimeout(captureScreenshot(), SCREENSHOT_TIMEOUT_MS, null);
         if (DEBUG) console.log('[DEBUG MAIN] Screenshot captured successfully (length:', imageDataUrl.length, ')');
       }
-      catch (e) { 
+      catch (e) {
         if (DEBUG) console.error('[DEBUG MAIN] Screenshot capture failed:', e);
-        send('status', { message: 'Screen capture needs permission — grant Screen Recording to cue in System Settings.' }); 
+        send('status', { message: 'Screen capture failed or timed out — grant Screen Recording permission to cue in System Settings, then try again.' });
       }
     }
 
