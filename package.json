@@ -59,5 +59,8 @@
     "@anthropic-ai/sdk": "^0.115.0",
     "@google/genai": "^2.13.0",
     "openai": "^6.49.0"
+  },
+  "overrides": {
+    "@noble/hashes": "1.8.0"
   }
 }
