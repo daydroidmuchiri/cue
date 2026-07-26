@@ -15,7 +15,7 @@ const DEFAULTS = {
   smart: false,
   resumeContext: '',
   shortcuts: { assist: 'CommandOrControl+Return', leetcode: 'CommandOrControl+H' },
-  apiKeys: { openai: '', anthropic: '', gemini: '', nvidia: '', openrouter: '' },
+  apiKeys: { openai: '', anthropic: '', gemini: '', nvidia: '', openrouter: '', github: '' },
   models: {
     openai: { fast: 'gpt-4o-mini', smart: 'gpt-4o' },
     anthropic: { fast: 'claude-3-5-haiku-latest', smart: 'claude-3-5-sonnet-latest' },
@@ -25,7 +25,9 @@ const DEFAULTS = {
     // If either rotates out of the catalog, src/llm.js automatically retries
     // once against `openrouter/free` (see isRetriableOpenRouterError) rather
     // than erroring outright.
-    openrouter: { fast: 'google/gemma-4-26b-a4b-it:free', smart: 'google/gemma-4-31b-it:free' }
+    openrouter: { fast: 'google/gemma-4-26b-a4b-it:free', smart: 'google/gemma-4-31b-it:free' },
+    // GitHub Models: free-tier catalog behind a GitHub PAT (models:read scope).
+    github: { fast: 'openai/gpt-4o-mini', smart: 'openai/gpt-4o' }
   }
 };
 

@@ -13,7 +13,8 @@ const REQUEST_TIMEOUT_MS = 90000;
 // just a different base URL. NVIDIA NIM and OpenRouter both fall into this bucket.
 const PROVIDER_BASE_URLS = {
   nvidia: 'https://integrate.api.nvidia.com/v1',
-  openrouter: 'https://openrouter.ai/api/v1'
+  openrouter: 'https://openrouter.ai/api/v1',
+  github: 'https://models.github.ai/inference'
 };
 
 // OpenRouter asks OpenAI-compatible clients to identify the calling app via these
@@ -188,7 +189,7 @@ function createLLM(settings, clients = {}) {
       const controller = new AbortController();
       const args = { apiKey, model, maxTokens, signal: controller.signal, ...params };
       const run = async () => {
-        if (provider === 'openai' || provider === 'nvidia' || provider === 'openrouter') {
+        if (provider === 'openai' || provider === 'nvidia' || provider === 'openrouter' || provider === 'github') {
           let emittedAny = false;
           const openAIArgs = {
             ...args,
