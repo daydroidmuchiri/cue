@@ -7,6 +7,11 @@
 // here so a long-running session doesn't balloon every Recap's token cost.
 const RECAP_MAX_TURNS = 200;
 
+// llm.js defaults to 8192 output tokens, sized for a full code answer. The
+// conversational modes below produce a few sentences or bullets -- reserving
+// 8x more than they can use is pure over-provisioning.
+const SHORT_MODE_MAX_TOKENS = 1024;
+
 // Screenshots and live transcripts can carry adversarial text -- a malicious
 // webpage, a meeting participant, a planted code comment -- far more easily
 // than the user's own resume (which already gets this treatment in
@@ -45,6 +50,7 @@ const MODES = {
     needsScreen: false,
     userBubble: 'What should I say?',
     small: false,
+    maxTokens: SHORT_MODE_MAX_TOKENS,
     system:
       'You are cue, whispering suggested replies to the user during a live conversation. ' +
       '"Them" is the other person; "You" is the user. Based on what Them just said and what You already said, ' +
@@ -61,6 +67,7 @@ const MODES = {
     needsScreen: false,
     userBubble: 'Follow-up questions',
     small: true,
+    maxTokens: SHORT_MODE_MAX_TOKENS,
     system:
       'You are cue. Given the conversation, suggest 2–4 sharp, relevant follow-up questions the user could ask next ' +
       'to sound engaged and drive the discussion. Return them as a short bullet list, nothing else.',
@@ -75,6 +82,7 @@ const MODES = {
     needsScreen: false,
     userBubble: 'Recap',
     small: true,
+    maxTokens: SHORT_MODE_MAX_TOKENS,
     system:
       'You are cue. Summarize the conversation so far for someone who joined late: ' +
       'a few key points, any decisions, and action items. Use short bullets under bold headers. Be brief.',

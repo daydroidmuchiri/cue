@@ -372,3 +372,23 @@ test('streamGemini: attaches the image as inlineData on the last user turn', asy
   const { contents } = GoogleGenAIClient.instances[0].lastParams;
   assert.deepEqual(contents[0].parts, [{ text: 'describe this' }, { inlineData: { mimeType: 'image/png', data: 'QQQQ' } }]);
 });
+
+test('a caller-supplied maxTokens overrides DEFAULT_MAX_TOKENS', async () => {
+  const OpenAIClient = makeFakeOpenAI([{ choices: [{ delta: { content: 'ok' } }] }]);
+  const llm = createLLM(
+    { provider: 'openai', apiKeys: { openai: 'sk-x' }, models: { openai: { fast: 'gpt-4o-mini' } }, smart: false },
+    { OpenAIClient }
+  );
+  await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], maxTokens: 1024, onToken: () => {} });
+  assert.equal(OpenAIClient.instances[0].lastParams.max_tokens, 1024);
+});
+
+test('an unset maxTokens falls back to DEFAULT_MAX_TOKENS', async () => {
+  const OpenAIClient = makeFakeOpenAI([{ choices: [{ delta: { content: 'ok' } }] }]);
+  const llm = createLLM(
+    { provider: 'openai', apiKeys: { openai: 'sk-x' }, models: { openai: { fast: 'gpt-4o-mini' } }, smart: false },
+    { OpenAIClient }
+  );
+  await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onToken: () => {} });
+  assert.equal(OpenAIClient.instances[0].lastParams.max_tokens, DEFAULT_MAX_TOKENS);
+});

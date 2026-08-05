@@ -45,3 +45,19 @@ test('recap mode on a short session is unaffected by the bound', () => {
   const built = MODES.recap.build(ctx);
   for (let i = 0; i < 10; i++) assert.ok(built.includes('turn number ' + i));
 });
+
+// The 8192 default in llm.js is sized for a full LeetCode answer (approach +
+// code + complexity). The conversational modes produce a few sentences and
+// have no business reserving that much.
+test('short conversational modes cap their output tokens', () => {
+  for (const name of ['say', 'followup', 'recap']) {
+    assert.equal(typeof MODES[name].maxTokens, 'number', `mode "${name}" should declare a cap`);
+    assert.ok(MODES[name].maxTokens <= 1024, `mode "${name}" cap should be small`);
+  }
+});
+
+test('code-producing modes leave maxTokens unset so llm.js applies the full default', () => {
+  for (const name of ['assist', 'ask', 'leetcode']) {
+    assert.equal(MODES[name].maxTokens, undefined, `mode "${name}" must not be capped -- it emits full code answers`);
+  }
+});

@@ -233,6 +233,7 @@ async function runFeature(mode, userText) {
       system: appendResumeContext(def.system, settings.resumeContext),
       turns: [{ role: 'user', text: built }],
       imageDataUrl,
+      maxTokens: def.maxTokens,
       onToken: (t) => send('llm:token', { text: t })
     });
     if (DEBUG) console.log('[DEBUG MAIN] Full LLM Output:\n', fullText);
