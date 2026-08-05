@@ -115,7 +115,18 @@ async function streamAnthropic({ apiKey, model, system, turns, imageDataUrl, max
   });
   if (DEBUG) console.log('[DEBUG LLM] streamAnthropic sending request to Anthropic SDK with messages count:', messages.length);
   try {
-    const stream = await client.messages.create({ model, max_tokens: maxTokens, system, messages, stream: true }, { signal });
+    // Thinking is ON by default on Sonnet 5 / Opus 5 when this param is omitted,
+    // and it is actively wrong for an overlay: thinking tokens count against
+    // max_tokens (so a long think truncates the answer mid-code-block), and
+    // `display` defaults to "omitted" -- the thinking blocks stream with empty
+    // text, so the loop below emits nothing and the user watches a bare caret
+    // for the whole thinking pass, exactly the hang-looking failure onRetry
+    // exists to prevent. Disabling is a no-op on models that don't think by
+    // default (Haiku 4.5), so one unconditional value covers both tiers.
+    // Caveat: models that CANNOT stop thinking (Fable 5, Mythos 5) reject this
+    // with a 400 -- they're not shipped defaults, but a user can type one into
+    // Settings, and the error surfaces there verbatim.
+    const stream = await client.messages.create({ model, max_tokens: maxTokens, system, messages, thinking: { type: 'disabled' }, stream: true }, { signal });
     let full = '';
     for await (const ev of stream) {
       if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') { full += ev.delta.text; onToken(ev.delta.text); }

@@ -18,7 +18,11 @@ const DEFAULTS = {
   apiKeys: { openai: '', anthropic: '', gemini: '', nvidia: '', openrouter: '' },
   models: {
     openai: { fast: 'gpt-4o-mini', smart: 'gpt-4o' },
-    anthropic: { fast: 'claude-3-5-haiku-latest', smart: 'claude-3-5-sonnet-latest' },
+    // The 3.5 models these replaced reached end-of-life (Sonnet 2025-10-28,
+    // Haiku 2026-02-19) and now 404. Haiku 4.5 has no adaptive thinking, so it
+    // behaves exactly like the old fast tier; Sonnet 5 thinks by default, which
+    // src/llm.js turns off -- see the comment on the thinking param there.
+    anthropic: { fast: 'claude-haiku-4-5', smart: 'claude-sonnet-5' },
     gemini: { fast: 'gemini-2.5-flash', smart: 'gemini-2.5-pro' },
     nvidia: { fast: 'meta/llama-3.2-11b-vision-instruct', smart: 'meta/llama-3.2-90b-vision-instruct' },
     // Named models for better quality than the random `openrouter/free` router.

@@ -301,7 +301,7 @@ test('streamAnthropic: passes system as a top-level param, not inside messages',
     { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hi there' } }
   ]);
   const llm = createLLM(
-    { provider: 'anthropic', apiKeys: { anthropic: 'sk-ant-x' }, models: { anthropic: { fast: 'claude-3-5-haiku-latest' } }, smart: false },
+    { provider: 'anthropic', apiKeys: { anthropic: 'sk-ant-x' }, models: { anthropic: { fast: 'claude-haiku-4-5' } }, smart: false },
     { AnthropicClient }
   );
   const full = await llm.stream({ system: 'sys prompt', turns: [{ role: 'user', text: 'hi' }], onToken: () => {} });
@@ -314,7 +314,7 @@ test('streamAnthropic: passes system as a top-level param, not inside messages',
 test('streamAnthropic: attaches the image as a base64 source before the text block', async () => {
   const AnthropicClient = makeFakeAnthropic([{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } }]);
   const llm = createLLM(
-    { provider: 'anthropic', apiKeys: { anthropic: 'sk-ant-x' }, models: { anthropic: { fast: 'claude-3-5-haiku-latest' } }, smart: false },
+    { provider: 'anthropic', apiKeys: { anthropic: 'sk-ant-x' }, models: { anthropic: { fast: 'claude-haiku-4-5' } }, smart: false },
     { AnthropicClient }
   );
   await llm.stream({
@@ -334,11 +334,29 @@ test('streamAnthropic: ignores non-text-delta events (e.g. content_block_start)'
     { type: 'content_block_delta', delta: { type: 'text_delta', text: 'only this' } }
   ]);
   const llm = createLLM(
-    { provider: 'anthropic', apiKeys: { anthropic: 'sk-ant-x' }, models: { anthropic: { fast: 'claude-3-5-haiku-latest' } }, smart: false },
+    { provider: 'anthropic', apiKeys: { anthropic: 'sk-ant-x' }, models: { anthropic: { fast: 'claude-haiku-4-5' } }, smart: false },
     { AnthropicClient }
   );
   const full = await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onToken: () => {} });
   assert.equal(full, 'only this');
+});
+
+// Sonnet 5 and Opus 5 think by default when `thinking` is omitted. That is wrong
+// for an overlay twice over: thinking tokens are billed against max_tokens (so a
+// long think truncates the answer), and `display` defaults to "omitted" -- the
+// thinking blocks carry empty text, so streamAnthropic emits nothing and the user
+// stares at a bare caret. Disabling must be explicit, because omitting the param
+// is precisely what turns it on.
+test('streamAnthropic: explicitly disables thinking so it cannot eat the token budget', async () => {
+  const AnthropicClient = makeFakeAnthropic([{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } }]);
+  const llm = createLLM(
+    { provider: 'anthropic', apiKeys: { anthropic: 'sk-ant-x' }, models: { anthropic: { smart: 'claude-sonnet-5' } }, smart: true },
+    { AnthropicClient }
+  );
+  await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onToken: () => {} });
+  const params = AnthropicClient.instances[0].lastParams;
+  assert.deepEqual(params.thinking, { type: 'disabled' }, 'omitting `thinking` would silently enable it on Sonnet 5');
+  assert.equal(params.max_tokens, DEFAULT_MAX_TOKENS, 'the full budget stays available for the answer');
 });
 
 test('streamGemini: maps assistant role to model and passes system via systemInstruction', async () => {
