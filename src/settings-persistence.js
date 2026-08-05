@@ -103,8 +103,13 @@ function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, aut
       // encryptFields copies fields outside `secretFields` through untouched,
       // so a retired provider's stored secret would live in cue-data.json
       // forever with no UI left to view or clear it. Drop it on the next write.
-      for (const f of Object.keys(encrypted)) {
-        if (!secretFields.includes(f)) delete encrypted[f];
+      // Gate this behind knownProviders: pruning deletes a stored secret, so a
+      // caller must opt into retired-provider handling to get it. Without that
+      // opt-in, preserve the exact behavior this code had before.
+      if (knownProviders) {
+        for (const f of Object.keys(encrypted)) {
+          if (!secretFields.includes(f)) delete encrypted[f];
+        }
       }
       // Never let a field we couldn't decrypt this session get overwritten
       // with a blank/re-encrypted-empty value -- keep whatever was on disk.

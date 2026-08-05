@@ -242,3 +242,19 @@ test('the prune does not regress ciphertext preservation for a known field', () 
   session2.setSettings({});
   assert.equal(fs.files.get(FILE), originalOnDisk, 'prune must not disturb undecryptable-field preservation');
 });
+
+test('the prune is completely inert when knownProviders is omitted', () => {
+  // Omitting knownProviders means no retired-provider handling, so unknown
+  // apiKeys fields must NOT be deleted. This exercises the save path to verify
+  // the prune does not run when not asked for.
+  const fs = fakeFs({
+    [FILE]: JSON.stringify({ provider: 'openai', apiKeys: { openai: '', anthropic: '', github: 'enc:v1:c3RhbGU=' } })
+  });
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS
+    // NOTE: knownProviders is deliberately omitted
+  });
+  store.setSettings({}); // trigger save
+  const onDisk = JSON.parse(fs.files.get(FILE));
+  assert.equal(onDisk.apiKeys.github, 'enc:v1:c3RhbGU=', 'unknown field must survive when knownProviders is not supplied');
+});
