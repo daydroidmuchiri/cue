@@ -371,6 +371,16 @@ app.whenReady().then(() => {
   store.setSettings({});
 
   createWindow();
+
+  // The first desktopCapturer.getSources() call of a process pays ~1s of
+  // capture-stream startup; later calls cost ~600ms. That cost is independent
+  // of thumbnailSize (a 1x1 thumbnail is just as slow), so it can't be
+  // optimized away -- only paid early. Do it here, off the critical path, so
+  // the user's first Assist doesn't eat it. The image is discarded.
+  // Deliberately not awaited: this must never delay startup.
+  desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
+    .catch(() => { /* pre-warm is best-effort; a real capture will retry later */ });
+
   registerShortcuts();
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
