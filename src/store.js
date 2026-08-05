@@ -15,7 +15,7 @@ const DEFAULTS = {
   smart: false,
   resumeContext: '',
   shortcuts: { assist: 'CommandOrControl+Return', leetcode: 'CommandOrControl+H' },
-  apiKeys: { openai: '', anthropic: '', gemini: '', nvidia: '', openrouter: '', github: '' },
+  apiKeys: { openai: '', anthropic: '', gemini: '', nvidia: '', openrouter: '' },
   models: {
     openai: { fast: 'gpt-4o-mini', smart: 'gpt-4o' },
     anthropic: { fast: 'claude-3-5-haiku-latest', smart: 'claude-3-5-sonnet-latest' },
@@ -25,9 +25,7 @@ const DEFAULTS = {
     // If either rotates out of the catalog, src/llm.js automatically retries
     // once against `openrouter/free` (see isRetriableOpenRouterError) rather
     // than erroring outright.
-    openrouter: { fast: 'google/gemma-4-26b-a4b-it:free', smart: 'google/gemma-4-31b-it:free' },
-    // GitHub Models: free-tier catalog behind a GitHub PAT (models:read scope).
-    github: { fast: 'openai/gpt-4o-mini', smart: 'openai/gpt-4o' }
+    openrouter: { fast: 'google/gemma-4-26b-a4b-it:free', smart: 'google/gemma-4-31b-it:free' }
   }
 };
 
@@ -48,6 +46,9 @@ const cipher = {
 const settingsStore = createSettingsStore({
   fs, filePath: FILE, cipher, defaults: DEFAULTS, secretFields: SECRET_FIELDS,
   autoSwitchProviderKeys: SECRET_FIELDS,
+  // Same derived list: every apiKeys field is a provider name. A user sitting
+  // on a provider we've dropped gets migrated to a valid one on load.
+  knownProviders: SECRET_FIELDS,
   maxLengths: { resumeContext: MAX_RESUME_CONTEXT_CHARS }
 });
 

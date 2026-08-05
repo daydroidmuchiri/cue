@@ -61,16 +61,17 @@ test('createLLM.ready works for the openrouter provider like any other', () => {
   assert.equal(llm.model, 'meta-llama/llama-3.2-11b-vision-instruct:free');
 });
 
-test('resolveBaseURL points nvidia, openrouter and github at their OpenAI-compatible endpoints', () => {
+test('resolveBaseURL points nvidia and openrouter at their OpenAI-compatible endpoints', () => {
   assert.equal(resolveBaseURL('nvidia'), 'https://integrate.api.nvidia.com/v1');
   assert.equal(resolveBaseURL('openrouter'), 'https://openrouter.ai/api/v1');
-  assert.equal(resolveBaseURL('github'), 'https://models.github.ai/inference');
 });
 
-test('createLLM.ready works for the github provider like any other', () => {
+// GitHub Models was fully retired on 2026-07-30; both endpoints cue used now
+// return 410 Gone. Routing to it can only ever produce a confusing hard error.
+test('the retired github provider is no longer routable', () => {
+  assert.equal(resolveBaseURL('github'), undefined);
   const llm = createLLM({ provider: 'github', apiKeys: { github: 'github_pat_x' }, models: { github: { fast: 'openai/gpt-4o-mini' } }, smart: false });
-  assert.equal(llm.ready, true);
-  assert.equal(llm.model, 'openai/gpt-4o-mini');
+  return assert.rejects(() => llm.stream({ system: '', turns: [], onToken: () => {} }), /unknown provider/i);
 });
 
 test('resolveBaseURL is undefined for providers that use their own SDK/endpoint', () => {
