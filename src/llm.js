@@ -205,6 +205,10 @@ function createLLM(settings, clients = {}) {
             // OpenRouter's own free-model router instead of failing outright.
             // Only if nothing has streamed yet -- see shouldRetryWithFreeRouter.
             if (shouldRetryWithFreeRouter({ provider, model, emittedAny, err })) {
+              // A second full round trip roughly doubles the wait, and without
+              // this the UI shows a caret and nothing else -- indistinguishable
+              // from a hang. Tell the caller so it can say what's happening.
+              if (typeof args.onRetry === 'function') args.onRetry({ model, status: err.status });
               return await streamOpenAI({ ...openAIArgs, model: OPENROUTER_FREE_MODEL });
             }
             throw err;

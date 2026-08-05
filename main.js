@@ -233,7 +233,10 @@ async function runFeature(mode, userText) {
       system: appendResumeContext(def.system, settings.resumeContext),
       turns: [{ role: 'user', text: built }],
       imageDataUrl,
-      maxTokens: def.maxTokens,
+      maxTokens: def.maxTokens, // undefined for code modes -> llm.js's 8192 default
+      onRetry: ({ model }) => send('status', {
+        message: model + ' is rate-limited or unavailable right now — retrying with OpenRouter\'s free router. This one will take longer.'
+      }),
       onToken: (t) => send('llm:token', { text: t })
     });
     if (DEBUG) console.log('[DEBUG MAIN] Full LLM Output:\n', fullText);

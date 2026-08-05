@@ -392,3 +392,101 @@ test('an unset maxTokens falls back to DEFAULT_MAX_TOKENS', async () => {
   await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onToken: () => {} });
   assert.equal(OpenAIClient.instances[0].lastParams.max_tokens, DEFAULT_MAX_TOKENS);
 });
+
+test('onRetry fires once, with the failed model, before the free-router fallback', async () => {
+  let call = 0;
+  class RateLimitedThenFreeClient {
+    constructor(opts) { this.opts = opts; }
+    get chat() {
+      const self = this;
+      return { completions: { create: async (params) => {
+        self.lastParams = params;
+        call++;
+        if (call === 1) { const e = new Error('rate limited'); e.status = 429; throw e; }
+        return (async function* () { yield { choices: [{ delta: { content: 'fallback ok' } }] }; })();
+      } } };
+    }
+  }
+  const llm = createLLM(
+    { provider: 'openrouter', apiKeys: { openrouter: 'sk-or-x' }, models: { openrouter: { fast: 'some/model:free' } }, smart: false },
+    { OpenAIClient: RateLimitedThenFreeClient }
+  );
+  const retries = [];
+  const full = await llm.stream({
+    system: 'sys', turns: [{ role: 'user', text: 'hi' }],
+    onRetry: (info) => retries.push(info),
+    onToken: () => {}
+  });
+  assert.equal(full, 'fallback ok');
+  assert.equal(retries.length, 1, 'exactly one retry notification');
+  assert.equal(retries[0].model, 'some/model:free', 'reports the model that failed, not the fallback');
+  assert.equal(retries[0].status, 429);
+});
+
+test('onRetry does not fire on a successful first attempt', async () => {
+  const OpenAIClient = makeFakeOpenAI([{ choices: [{ delta: { content: 'ok' } }] }]);
+  const llm = createLLM(
+    { provider: 'openrouter', apiKeys: { openrouter: 'sk-or-x' }, models: { openrouter: { fast: 'some/model:free' } }, smart: false },
+    { OpenAIClient }
+  );
+  let fired = false;
+  await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onRetry: () => { fired = true; }, onToken: () => {} });
+  assert.equal(fired, false);
+});
+
+test('onRetry does not fire on a non-retriable error', async () => {
+  class UnauthorizedClient {
+    constructor(opts) { this.opts = opts; }
+    get chat() {
+      return { completions: { create: async () => { const e = new Error('bad key'); e.status = 401; throw e; } } };
+    }
+  }
+  const llm = createLLM(
+    { provider: 'openrouter', apiKeys: { openrouter: 'sk-or-x' }, models: { openrouter: { fast: 'some/model:free' } }, smart: false },
+    { OpenAIClient: UnauthorizedClient }
+  );
+  let fired = false;
+  await assert.rejects(() => llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onRetry: () => { fired = true; }, onToken: () => {} }));
+  assert.equal(fired, false, '401 must surface as-is, not look like a retry');
+});
+
+test('onRetry does not fire once tokens have already streamed', async () => {
+  // Mirrors the emittedAny guard: a mid-stream failure must not retry at all,
+  // so it must not claim to be retrying either.
+  class FailsMidStreamClient {
+    constructor(opts) { this.opts = opts; }
+    get chat() {
+      return { completions: { create: async () => (async function* () {
+        yield { choices: [{ delta: { content: 'partial' } }] };
+        const e = new Error('rate limited'); e.status = 429; throw e;
+      })() } };
+    }
+  }
+  const llm = createLLM(
+    { provider: 'openrouter', apiKeys: { openrouter: 'sk-or-x' }, models: { openrouter: { fast: 'some/model:free' } }, smart: false },
+    { OpenAIClient: FailsMidStreamClient }
+  );
+  let fired = false;
+  await assert.rejects(() => llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onRetry: () => { fired = true; }, onToken: () => {} }));
+  assert.equal(fired, false);
+});
+
+test('an omitted onRetry does not throw when a retry happens', async () => {
+  let call = 0;
+  class FlakyClient {
+    constructor(opts) { this.opts = opts; }
+    get chat() {
+      return { completions: { create: async () => {
+        call++;
+        if (call === 1) { const e = new Error('rate limited'); e.status = 429; throw e; }
+        return (async function* () { yield { choices: [{ delta: { content: 'ok' } }] }; })();
+      } } };
+    }
+  }
+  const llm = createLLM(
+    { provider: 'openrouter', apiKeys: { openrouter: 'sk-or-x' }, models: { openrouter: { fast: 'some/model:free' } }, smart: false },
+    { OpenAIClient: FlakyClient }
+  );
+  const full = await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], onToken: () => {} });
+  assert.equal(full, 'ok');
+});
