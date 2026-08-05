@@ -186,7 +186,11 @@ function createLLM(settings, clients = {}) {
     async stream(params) {
       if (DEBUG) console.log('[DEBUG LLM] stream() invoked for provider:', provider);
       const controller = new AbortController();
-      const args = { apiKey, model, maxTokens, signal: controller.signal, ...params };
+      const args = { apiKey, model, signal: controller.signal, ...params };
+      // An explicitly-passed `maxTokens: undefined` (main.js does this for the
+      // uncapped code modes) must not clobber the module default -- object spread
+      // copies undefined-valued keys over it, it doesn't skip them.
+      if (args.maxTokens == null) args.maxTokens = maxTokens;
       const run = async () => {
         if (provider === 'openai' || provider === 'nvidia' || provider === 'openrouter') {
           let emittedAny = false;

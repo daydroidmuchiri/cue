@@ -393,6 +393,20 @@ test('an unset maxTokens falls back to DEFAULT_MAX_TOKENS', async () => {
   assert.equal(OpenAIClient.instances[0].lastParams.max_tokens, DEFAULT_MAX_TOKENS);
 });
 
+test('an explicitly-passed undefined maxTokens still falls back to DEFAULT_MAX_TOKENS', async () => {
+  // main.js always sets the key (`maxTokens: def.maxTokens`), and it is
+  // undefined for the uncapped code modes. Object spread copies that
+  // undefined over the default rather than skipping it -- so omitting the
+  // key and passing it as undefined are NOT the same test.
+  const OpenAIClient = makeFakeOpenAI([{ choices: [{ delta: { content: 'ok' } }] }]);
+  const llm = createLLM(
+    { provider: 'openai', apiKeys: { openai: 'sk-x' }, models: { openai: { fast: 'gpt-4o-mini' } }, smart: false },
+    { OpenAIClient }
+  );
+  await llm.stream({ system: 'sys', turns: [{ role: 'user', text: 'hi' }], maxTokens: undefined, onToken: () => {} });
+  assert.equal(OpenAIClient.instances[0].lastParams.max_tokens, DEFAULT_MAX_TOKENS);
+});
+
 test('onRetry fires once, with the failed model, before the free-router fallback', async () => {
   let call = 0;
   class RateLimitedThenFreeClient {
