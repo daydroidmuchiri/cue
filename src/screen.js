@@ -14,6 +14,10 @@ const { fitLongEdge } = require('./image-fit');
 // Note this does NOT make capture faster -- getSources costs the same ~620ms
 // regardless of thumbnailSize. It cuts upload time and model prefill only.
 const MAX_EDGE = 1280;
+// 80 was empirically checked against dense monospace/code text at 1280px (a
+// LeetCode problem statement, an IDE) and held up as legible. Treat this as a
+// floor, not a starting point -- if file size ever needs trimming further,
+// don't lower this without re-checking text legibility at that size first.
 const JPEG_QUALITY = 80;
 
 async function captureScreenshot() {

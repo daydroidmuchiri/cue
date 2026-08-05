@@ -937,15 +937,30 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ## Final verification
 
+> **Note on test counts:** the per-task counts cited in the prose above (96 /
+> 102 / 106 / 111) are historical -- recorded at the time each task landed,
+> and one of them drifted by one after an early fix round added a test. They
+> are not re-verified here. The authoritative figure is the one below.
+
 - [ ] **Full suite green**
 
 Run: `npm test 2>&1 | tail -8`
-Expected: 111 tests, 0 failing.
+Expected: 114 tests, 0 failing. (111 after Task 7, +1 from the final-review
+fix for the `maxTokens: undefined` clobber bug in `src/llm.js`, +1 from the
+final-review test covering migration and prune together.)
 
 - [ ] **No lingering references to the retired provider**
 
 Run: `grep -rn "github" src/ renderer/ main.js preload.js test/ -i | grep -v "github.com/daydroidmuchiri" | grep -v "retired"`
-Expected: no output.
+Expected: **not** empty. Legitimate explanatory comments in
+`src/settings-persistence.js` and test fixtures in `test/llm.test.js` /
+`test/settings-persistence.test.js` deliberately name the retired provider
+(as history, as a fixture value, or as a variable/string like `github_pat_x`)
+-- none of those are lingering *routing* references. Confirm instead that
+every hit is one of those three categories, and that nothing in `src/llm.js`
+routing logic (`PROVIDER_BASE_URLS`, the provider dispatch in `stream()`) or
+`src/store.js` defaults (`DEFAULTS.apiKeys`, `DEFAULTS.models`) still
+mentions `github`.
 
 - [ ] **End-to-end smoke test**
 

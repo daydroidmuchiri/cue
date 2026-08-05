@@ -106,6 +106,10 @@ function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, aut
       // Gate this behind knownProviders: pruning deletes a stored secret, so a
       // caller must opt into retired-provider handling to get it. Without that
       // opt-in, preserve the exact behavior this code had before.
+      // Scope is deliberately apiKeys only -- a retired provider's entry under
+      // `models.<retired>` is left on disk indefinitely. That's harmless (not
+      // a secret, nothing reads it back), so it isn't worth widening this
+      // destructive operation to reach it too.
       if (knownProviders) {
         for (const f of Object.keys(encrypted)) {
           if (!secretFields.includes(f)) delete encrypted[f];

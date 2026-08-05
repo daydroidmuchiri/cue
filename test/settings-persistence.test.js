@@ -243,6 +243,26 @@ test('the prune does not regress ciphertext preservation for a known field', () 
   assert.equal(fs.files.get(FILE), originalOnDisk, 'prune must not disturb undecryptable-field preservation');
 });
 
+test('CRITICAL: migration and prune both happen together, in a single setSettings({}) -- the real boot path', () => {
+  // Every earlier test exercises migration or prune alone. The only path an
+  // actual ex-GitHub-Models user takes is both at once: main.js loads
+  // settings (triggering the migration) and then calls setSettings({}) on
+  // every boot (triggering the prune), in one real session. Nothing before
+  // this test guarded that composition.
+  const fs = fakeFs({
+    [FILE]: JSON.stringify({ provider: 'github', apiKeys: { openai: '', anthropic: 'sk-ant-x', github: 'github_pat_x' } })
+  });
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS,
+    autoSwitchProviderKeys: KNOWN_PROVIDERS, knownProviders: KNOWN_PROVIDERS
+  });
+  store.setSettings({}); // main.js does exactly this on every boot
+
+  const onDisk = JSON.parse(fs.files.get(FILE));
+  assert.equal(store.getSettings().provider, 'anthropic', 'migrated to the provider the user actually has a key for');
+  assert.equal(onDisk.apiKeys.github, undefined, 'the orphaned github entry must be gone from disk');
+});
+
 test('the prune is completely inert when knownProviders is omitted', () => {
   // Omitting knownProviders means no retired-provider handling, so unknown
   // apiKeys fields must NOT be deleted. This exercises the save path to verify

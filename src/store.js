@@ -48,6 +48,16 @@ const settingsStore = createSettingsStore({
   autoSwitchProviderKeys: SECRET_FIELDS,
   // Same derived list: every apiKeys field is a provider name. A user sitting
   // on a provider we've dropped gets migrated to a valid one on load.
+  //
+  // This reuse asserts an inverse invariant that SECRET_FIELDS's own comment
+  // doesn't need to: not just "every apiKeys field is a secret" but "every
+  // supported provider has an apiKeys field". A future keyless provider
+  // (Ollama, a local model, any OS-native endpoint with no API key to store)
+  // would violate that silently -- it would have no entry in apiKeys, so
+  // knownProviders wouldn't include it, and applyRetiredProviderMigration
+  // would treat it as retired and migrate every user off it at the next boot.
+  // If that ever comes up, knownProviders needs its own list rather than
+  // reusing SECRET_FIELDS.
   knownProviders: SECRET_FIELDS,
   maxLengths: { resumeContext: MAX_RESUME_CONTEXT_CHARS }
 });
