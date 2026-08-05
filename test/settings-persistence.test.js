@@ -35,6 +35,7 @@ function unavailableCipher() {
 
 const DEFAULTS = { provider: 'openai', apiKeys: { openai: '', anthropic: '' } };
 const SECRET_FIELDS = ['openai', 'anthropic'];
+const KNOWN_PROVIDERS = ['openai', 'anthropic'];
 const FILE = '/fake/cue-data.json';
 
 test('getSettings returns defaults when no file exists yet', () => {
@@ -165,4 +166,79 @@ test('a field with no configured max length is left alone', () => {
   });
   store.setSettings({ provider: 'anthropic' });
   assert.equal(store.getSettings().provider, 'anthropic');
+});
+
+test('a retired provider WITH a saved key still migrates (auto-switch alone cannot rescue this)', () => {
+  // applyAutoSwitch returns early when apiKeys[provider] is truthy, so a user
+  // who saved a key for the retired provider would otherwise stay pinned to it
+  // and hit "unknown provider" on every action.
+  const fs = fakeFs({
+    [FILE]: JSON.stringify({ provider: 'github', apiKeys: { openai: '', anthropic: 'sk-ant-x', github: 'github_pat_x' } })
+  });
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS,
+    autoSwitchProviderKeys: KNOWN_PROVIDERS, knownProviders: KNOWN_PROVIDERS
+  });
+  assert.equal(store.getSettings().provider, 'anthropic', 'should land on the provider the user actually has a key for');
+});
+
+test('a retired provider with no other keys falls back to the shipped default', () => {
+  const fs = fakeFs({ [FILE]: JSON.stringify({ provider: 'github', apiKeys: { openai: '', anthropic: '' } }) });
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS,
+    autoSwitchProviderKeys: KNOWN_PROVIDERS, knownProviders: KNOWN_PROVIDERS
+  });
+  assert.equal(store.getSettings().provider, 'openai');
+});
+
+test('a valid provider is left untouched by the migration', () => {
+  const fs = fakeFs({ [FILE]: JSON.stringify({ provider: 'anthropic', apiKeys: { openai: '', anthropic: 'sk-ant-x' } }) });
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS,
+    autoSwitchProviderKeys: KNOWN_PROVIDERS, knownProviders: KNOWN_PROVIDERS
+  });
+  assert.equal(store.getSettings().provider, 'anthropic');
+});
+
+test('omitting knownProviders leaves provider handling exactly as before', () => {
+  const fs = fakeFs({ [FILE]: JSON.stringify({ provider: 'github', apiKeys: { openai: '', anthropic: '' } }) });
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS
+  });
+  assert.equal(store.getSettings().provider, 'github', 'no knownProviders means no migration');
+});
+
+test('save() prunes apiKeys entries for providers this build no longer knows', () => {
+  // encryptFields starts from {...obj}, so an unknown field is copied through
+  // untouched and would sit in cue-data.json forever with no UI to clear it.
+  const fs = fakeFs({
+    [FILE]: JSON.stringify({ provider: 'openai', apiKeys: { openai: '', anthropic: '', github: 'enc:v1:c3RhbGU=' } })
+  });
+  const store = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS,
+    knownProviders: KNOWN_PROVIDERS
+  });
+  store.setSettings({}); // main.js does exactly this on every boot
+  const onDisk = JSON.parse(fs.files.get(FILE));
+  assert.equal(onDisk.apiKeys.github, undefined, 'the retired provider key must be gone from disk');
+  assert.ok('openai' in onDisk.apiKeys, 'known providers must survive the prune');
+});
+
+test('the prune does not regress ciphertext preservation for a known field', () => {
+  // Guards the interaction between the new prune and the existing
+  // "never blank a field we could not decrypt this session" guarantee.
+  const fs = fakeFs();
+  const session1 = createSettingsStore({
+    fs, filePath: FILE, cipher: workingCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS,
+    knownProviders: KNOWN_PROVIDERS
+  });
+  session1.setSettings({ apiKeys: { openai: 'sk-precious-real-key' } });
+  const originalOnDisk = fs.files.get(FILE);
+
+  const session2 = createSettingsStore({
+    fs, filePath: FILE, cipher: unavailableCipher(), defaults: DEFAULTS, secretFields: SECRET_FIELDS,
+    knownProviders: KNOWN_PROVIDERS
+  });
+  session2.setSettings({});
+  assert.equal(fs.files.get(FILE), originalOnDisk, 'prune must not disturb undecryptable-field preservation');
 });

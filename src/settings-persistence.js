@@ -32,7 +32,10 @@ function deepMerge(base, over) {
 //   truncated to this length on save. The UI enforces this too (e.g. an
 //   <textarea maxlength>), but that's not a trust boundary -- any direct
 //   settings:set IPC call bypasses it, so it has to be enforced here as well.
-function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, autoSwitchProviderKeys, maxLengths }) {
+// knownProviders: optional list of provider names this build supports. When
+//   supplied, any provider not in this list is migrated to one with a key or
+//   the shipped default.
+function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, autoSwitchProviderKeys, knownProviders, maxLengths }) {
   let data = null;
   let undecryptable = {}; // field -> raw on-disk string we couldn't decrypt this session
 
@@ -44,6 +47,16 @@ function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, aut
     if (!autoSwitchProviderKeys || data.apiKeys[data.provider]) return;
     const active = autoSwitchProviderKeys.find((p) => data.apiKeys[p]);
     if (active) data.provider = active; // not saved here -- persists on next save
+  }
+
+  // A provider that no longer exists in this build -- e.g. 'github' after
+  // GitHub Models' 2026-07-30 retirement -- would otherwise strand the user:
+  // createLLM throws "unknown provider" on every action, and applyAutoSwitch
+  // can't rescue them because it returns early whenever the configured
+  // provider HAS a key, which a former GitHub Models user does.
+  function applyRetiredProviderMigration() {
+    if (!knownProviders || knownProviders.includes(data.provider)) return;
+    data.provider = knownProviders.find((p) => data.apiKeys[p]) || defaults.provider;
   }
 
   function load() {
@@ -77,6 +90,9 @@ function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, aut
     undecryptable = {};
     for (const f of failed) undecryptable[f] = (parsed.apiKeys || {})[f];
 
+    // Order matters: migrate off a retired provider FIRST, so applyAutoSwitch
+    // then evaluates a provider that actually exists in this build.
+    applyRetiredProviderMigration();
     applyAutoSwitch();
     return data;
   }
@@ -84,6 +100,12 @@ function createSettingsStore({ fs, filePath, cipher, defaults, secretFields, aut
   function save() {
     try {
       const encrypted = encryptFields(data.apiKeys, secretFields, cipher);
+      // encryptFields copies fields outside `secretFields` through untouched,
+      // so a retired provider's stored secret would live in cue-data.json
+      // forever with no UI left to view or clear it. Drop it on the next write.
+      for (const f of Object.keys(encrypted)) {
+        if (!secretFields.includes(f)) delete encrypted[f];
+      }
       // Never let a field we couldn't decrypt this session get overwritten
       // with a blank/re-encrypted-empty value -- keep whatever was on disk.
       for (const f of Object.keys(undecryptable)) {
