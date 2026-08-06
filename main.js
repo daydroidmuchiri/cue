@@ -12,6 +12,7 @@ const { appendTurn } = require('./src/transcript');
 const { pushCapped } = require('./src/audio-buffer');
 const { normalizeShortcut, findCollision, createTriggerGuard } = require('./src/shortcuts');
 const { isAllowedExternalUrl } = require('./src/safe-open');
+const { shouldAutoUpdate, wireAutoUpdater } = require('./src/updater');
 
 // Two cue processes would otherwise both register the same global shortcuts
 // (only one wins, silently) and both read/write cue-data.json with no
@@ -384,6 +385,22 @@ app.whenReady().then(() => {
   // Deliberately not awaited: this must never delay startup.
   desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
     .catch(() => { /* pre-warm is best-effort; a real capture will retry later */ });
+
+  // Windows-only and packaged-only; src/updater.js explains why. `electron-updater`
+  // is required lazily so it never loads on the platforms that can't use it, and
+  // the whole thing is wrapped because an updater must never be the reason the
+  // overlay fails to start.
+  if (shouldAutoUpdate({ platform: process.platform, isPackaged: app.isPackaged })) {
+    try {
+      wireAutoUpdater({
+        autoUpdater: require('electron-updater').autoUpdater,
+        onStatus: (message) => send('status', { message }),
+        log: (message) => console.log(message)
+      });
+    } catch (e) {
+      console.log('[cue] updater unavailable', e && e.message);
+    }
+  }
 
   registerShortcuts();
 

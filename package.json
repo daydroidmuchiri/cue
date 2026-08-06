@@ -9,8 +9,8 @@
     "start": "electron .",
     "test": "node --test",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --mac zip",
-    "dist:win": "electron-builder --win"
+    "dist": "electron-builder --mac zip --publish never",
+    "dist:win": "electron-builder --win --publish never"
   },
   "build": {
     "appId": "com.cue.overlay",
@@ -40,8 +40,16 @@
     "win": {
       "target": [
         "nsis"
-      ]
-    }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "daydroidmuchiri",
+        "repo": "cue"
+      }
+    ]
   },
   "keywords": [
     "electron",
@@ -58,6 +66,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@google/genai": "^2.13.0",
+    "electron-updater": "^6.8.9",
     "openai": "^6.49.0"
   },
   "overrides": {
